@@ -133,3 +133,5 @@ dmypy.json
 logger/cmake-build-debug
 logger/release
 logger/*.so
+
+.idea
