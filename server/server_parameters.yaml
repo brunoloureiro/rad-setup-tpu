@@ -1,0 +1,82 @@
+# All parameters necessary to a radiation test. No more magic paths and numbers
+
+# PORT the socket will listen to
+socket_port: 8080
+# IP of the remote socket server (hardware watchdog)
+server_ip: 192.168.1.5
+
+# time of a hard reboot
+hard_reboot_sleep_time: 10
+
+# log in whatever path you are executing this script
+server_log_file: server.log
+
+# Where to store the logs copied through SSH
+server_log_store_folder: logs/
+
+# Boot problem disable delta
+# Machine class will wait this time
+# to reboot again after a boot problem
+# e.g. 300s (5min)
+boot_problem_max_delta: 300
+
+#Set the machines IP to check
+#the ones which enabled parameter is false are not checked
+#:param ip the IP address of the machine
+#:param enabled True if the server must use this machine, False otherwise
+#:param reboot_diff delta to wait before reboot again
+#:param hostname the hostname of the machine,
+#       that must contains the device in the name
+#:param power_switch_ip IP address of the power switch
+#:param power_switch_port outlet of the power switch
+#:param power_switch_model brand of the power switch
+#:param username
+#:param password for connection
+machines: [
+  {
+    "ip": "192.168.1.20",
+    "enabled": False,
+    "diff_reboot": 100,
+    "hostname": "carol-raspberry1",
+    "power_switch_ip": "192.168.1.102",
+    "power_switch_port": 1,
+    "power_switch_model": "lindy",
+    "username": "carol",
+    "password": "R@diation"
+  },
+  {
+    "ip": "192.168.1.50",
+    "enabled": False,
+    "diff_reboot": 100,
+    "hostname": "pynq",
+    "power_switch_ip": "192.168.1.101",
+    "power_switch_port": 1,
+    "power_switch_model": "lindy",
+    "username": "xilinx",
+    "password": "xilinx"
+  },
+  {
+    #
+    "ip": "192.168.1.80",
+    "enabled": False,
+    "diff_reboot": 100,
+    "hostname": "carolnano1",
+    "power_switch_ip": "192.168.1.102",
+    "power_switch_port": 2,
+    "power_switch_model": "lindy",
+    "username": "carol",
+    "password": "R@diation"
+  },
+  {
+    #
+    "ip": "192.168.1.90",
+    "enabled": True,
+    "diff_reboot": 100,
+    "hostname": "carolk401",
+    "power_switch_ip": "192.168.1.102",
+    "power_switch_port": 1,
+    "power_switch_model": "lindy",
+    "username": "carol",
+    "password": "R@diation"
+  },
+]
