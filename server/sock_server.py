@@ -1,8 +1,8 @@
 #!/usr/bin/python3
-import socket
 import logging
 import yaml
-
+import zmq
+import time
 from classes.LoggerFormatter import ColoredLogger
 
 
@@ -48,17 +48,20 @@ def main():
     try:
         # Start the server socket
         # Create an INET, STREAMing socket
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
-            # Bind the socket to a public host, and a well-known port
-            server_ip, socket_port = server_parameters["server_ip"], server_parameters["socket_port"]
-            server_socket.bind((server_ip, socket_port))
-            logger.info(f"Server bind to: {server_ip}")
+        context = zmq.Context()
+        socket = context.socket(zmq.REP)
+        socket.bind("tcp://*:5555")
 
-            # Accept connections from outside
-            client_socket, address_list = server_socket.accept()
+        while True:
+            #  Wait for next request from client
+            message = socket.recv()
+            print(f"Received request: {message}")
 
-            # Close the connection
-            client_socket.close()
+            #  Do some 'work'
+            time.sleep(1)
+
+            #  Send reply back to client
+            # socket.send_string("World")
     except KeyboardInterrupt:
 
         logger.error("KeyboardInterrupt detected, exiting gracefully!( at least trying :) )")

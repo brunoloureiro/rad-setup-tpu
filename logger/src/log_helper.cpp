@@ -5,7 +5,7 @@
 #include <cstring>
 #include <memory>
 
-std::unique_ptr<log_helper_base> log_helper_ptr;
+std::unique_ptr<log_helper::log_helper_base> log_helper_ptr;
 
 size_t set_max_errors_iter(size_t max_errors) {
     //check if it is empty
@@ -53,17 +53,14 @@ void get_log_file_name(char *log_file_name) {
 
 uint8_t start_log_file(const char *benchmark_name, const char *test_info) {
     //TODO: do for local log file
-    log_helper_ptr = std::unique_ptr<log_helper_tcp>(
-            new log_helper_tcp(benchmark_name, test_info)
-            );
+    log_helper_ptr = std::make_unique<log_helper::log_helper_tcp>(benchmark_name, test_info);
     return bool(log_helper_ptr) == 0;
 }
 
 uint8_t end_log_file() {
-    //It is not necessary, as the destructors will close the files
-    //    auto mem = log_helper_ptr.release();
-    //    delete mem;
-    return true;
+    auto mem = log_helper_ptr.release();
+    delete mem;
+    return uint8_t(bool(mem));
 }
 
 uint8_t start_iteration() {
