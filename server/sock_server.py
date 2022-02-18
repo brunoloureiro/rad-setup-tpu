@@ -28,7 +28,9 @@ import fcntl
 import struct
 import errno
 
-def write_logs(str):
+DATA_SIZE=1
+
+def write_logs(log_outf,str):
     print(str, end = "\n")
     log_outf.write(str+"\n")
     log_outf.flush()
@@ -47,30 +49,40 @@ def get_self_ip(board_ip):
         
     return ip_socket.getsockname()[0] 
 
-def logging_setup(logger_name, log_file):
+def openLog(filename):
+
+    date=getTime()
+    log_outf = open(filename, "a")
+    write_logs(getTime() +" " +board_ip +" [INFO] starting radiation experiment...")
+    return log_outf
+
+def read_message_data():
+    #TODO: message reading function
+
+#def logging_setup(logger_name, log_file):
     """
     Logging setup
     :return: logger
     """
     # create logger with 'spam_application'
-    logger = logging.getLogger(logger_name)
-    logger.setLevel(logging.DEBUG)
+#    logger = logging.getLogger(logger_name)
+#    logger.setLevel(logging.DEBUG)
     # create file handler which logs even debug messages
-    fh = logging.FileHandler(log_file, mode='a')
-    fh.setLevel(logging.INFO)
+#    fh = logging.FileHandler(log_file, mode='a')
+#    fh.setLevel(logging.INFO)
     # create formatter and add it to the handlers
-    file_formatter = logging.Formatter(fmt='%(asctime)s %(name)s %(levelname)s %(message)s %(filename)s:%(lineno)d',
-                                       datefmt='%d-%m-%y %H:%M:%S')
+ #   file_formatter = logging.Formatter(fmt='%(asctime)s %(name)s %(levelname)s %(message)s %(filename)s:%(lineno)d',
+#                                       datefmt='%d-%m-%y %H:%M:%S')
 
     # add the handlers to the logger
-    fh.setFormatter(file_formatter)
-    logger.addHandler(fh)
+  #  fh.setFormatter(file_formatter)
+   # logger.addHandler(fh)
 
     # create console handler with a higher log level for console
-    console = ColoredLogger(logger_name)
-    # noinspection PyTypeChecker
-    logger.addHandler(console)
-    return logger
+    #console = ColoredLogger(logger_name)
+    ## noinspection PyTypeChecker
+    #logger.addHandler(console)
+    #return logger
 
 def create_udp_socket(dut_ip,server_port)
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) # the UDP socket which receives the messages
@@ -84,50 +96,39 @@ def main():
     Main function
     :return: None
     """
-    benchmark_name= sys.argv[1]   # name of the benchamrk (should it be the same as the exec file on the DUT)
-    dut_ip= sys.argv[2] # the DUT IP
-    server_receiving_port = int(sys.argv[3]) #the host port where is will receive the DUT messages
+    #benchmark_name= sys.argv[1]   # name of the benchamrk (should it be the same as the exec file on the DUT)
+    #dut_ip= sys.argv[2] # the DUT IP
+    #server_receiving_port = int(sys.argv[3]) #the host port where is will receive the DUT messages
     
-    switch_type= sys.argv[4] # power switch type
-    switch_ip=sys.argv[5] # power switch ip
-    switch_port= int(sys.argv[6]) # power switch port where the power supply of the DUT is connected
-    sleep_time= int(sys.argv[7]) # waiting time for the script. it should be larger enough for the DUT to boot
-    dut_username=sys.argv[8] # DUT username
-    dut_password=sys.argv[9]  # DUT username password
+    #switch_type= sys.argv[4] # power switch type
+    #switch_ip=sys.argv[5] # power switch ip
+    #switch_port= int(sys.argv[6]) # power switch port where the power supply of the DUT is connected
+    #sleep_time= int(sys.argv[7]) # waiting time for the script. it should be larger enough for the DUT to boot
+    #dut_username=sys.argv[8] # DUT username
+    #dut_password=sys.argv[9]  # DUT username password
 
     power_switch = switch.Switch(switch_type,switch_port,switch_ip, sleep_time)   #creates a power switch object
     server_socket=create_udp_socket(dut_ip,server_receiving_port);
-
+    openLog(filename)
     # log format
-    logger = logging_setup(logger_name=__name__, log_file="server.log")
+    #logger = logging_setup(logger_name=__name__, log_file="server.log")
 
     # load yaml file
-    with open("server_parameters.yaml", 'r') as fp:
-        server_parameters = yaml.load(fp, Loader=yaml.SafeLoader)
+    #with open("server_parameters.yaml", 'r') as fp:
+        #server_parameters = yaml.load(fp, Loader=yaml.SafeLoader)
 
     # attach signal handler for CTRL + C
-    try:
-        # Start the server socket
-        # Create an INET, STREAMing socket
-        context = zmq.Context()
-        socket = context.socket(zmq.REP)
-        socket.bind("tcp://*:5555")
+    while True:
+        try:
+            data, addr = sock.recvfrom(DATA_SIZE)
+        except socket.timeout:
+            #TODO: how to handle timeout 
+            #separate AppCrash from Linux Crash?
+        except KeyboardInterrupt:
+            logger.error("KeyboardInterrupt detected, exiting gracefully!( at least trying :) )")
+            exit(130)
+        #TODO: add other forms of ending the script
 
-        while True:
-            #  Wait for next request from client
-            message = socket.recv()
-            print(f"Received request: {message}")
-
-            #  Do some 'work'
-            time.sleep(1)
-
-            #  Send reply back to client
-            # socket.send_string("World")
-    except KeyboardInterrupt:
-
-        logger.error("KeyboardInterrupt detected, exiting gracefully!( at least trying :) )")
-        exit(130)
-
-
+#TODO: control several different scripts
 if __name__ == '__main__':
     main()
