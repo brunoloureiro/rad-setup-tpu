@@ -36,18 +36,7 @@ def write_logs(log_outf,str):
     log_outf.flush()
     return
 #getTime: returns a string representing the current time
-def getTime():
-    return datetime.now().strftime("%d-%m-%Y-%H-%M-%S")
-#gets server ip
-def get_self_ip(board_ip):
-    subnet = ".".join(board_ip.split(".")[:3]) + ".1"
-    ip_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        ip_socket.connect((subnet, 1027))
-    except socket.error:
-        return None
-        
-    return ip_socket.getsockname()[0] 
+
 
 def openLog(filename):
 
@@ -91,21 +80,13 @@ def create_udp_socket(dut_ip,server_port)
     sock.settimeout(SOCKET_TIMEOUT) 
     return sock
 
+#TODO this main receives the DUT ip, receving port, switch etc from an upper script which creates several diferent scripts
 def main():
     """
     Main function
     :return: None
     """
-    #benchmark_name= sys.argv[1]   # name of the benchamrk (should it be the same as the exec file on the DUT)
-    #dut_ip= sys.argv[2] # the DUT IP
-    #server_receiving_port = int(sys.argv[3]) #the host port where is will receive the DUT messages
-    
-    #switch_type= sys.argv[4] # power switch type
-    #switch_ip=sys.argv[5] # power switch ip
-    #switch_port= int(sys.argv[6]) # power switch port where the power supply of the DUT is connected
-    #sleep_time= int(sys.argv[7]) # waiting time for the script. it should be larger enough for the DUT to boot
-    #dut_username=sys.argv[8] # DUT username
-    #dut_password=sys.argv[9]  # DUT username password
+
 
     power_switch = switch.Switch(switch_type,switch_port,switch_ip, sleep_time)   #creates a power switch object
     server_socket=create_udp_socket(dut_ip,server_receiving_port);

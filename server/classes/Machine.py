@@ -204,7 +204,21 @@ class Machine(threading.Thread):
         :return: hostname str
         """
         return self.__hostname
+        
+    def getTime():
+        return datetime.now().strftime("%d-%m-%Y-%H-%M-%S")
 
+    #gets server ip
+    def get_self_ip(board_ip):
+        subnet = ".".join(board_ip.split(".")[:3]) + ".1"
+        ip_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            ip_socket.connect((subnet, 1027))
+        except socket.error:
+            #return errorcodes from ErrorCodes
+            return None
+        
+    return ip_socket.getsockname()[0] 
 
 if __name__ == '__main__':
     # FOR DEBUG ONLY
