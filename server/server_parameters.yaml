@@ -1,4 +1,6 @@
-# All parameters necessary to a radiation test. No more magic paths and numbers
+"""
+All parameters necessary to a radiation test. No more magic paths and numbers
+"""
 
 # PORT the socket will listen to
 socket_port: 8080

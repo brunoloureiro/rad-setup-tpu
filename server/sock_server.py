@@ -3,13 +3,12 @@ import logging
 import yaml
 import zmq
 import time
-from classes.LoggerFormatter import ColoredLogger
+from server.logger_formatter import ColoredLogger
 
 
-def logging_setup(logger_name, log_file):
-    """
-    Logging setup
-    :return: logger
+def logging_setup(logger_name: str, log_file: str) -> logging.Logger:
+    """Logging setup
+    :return: logger object
     """
     # create logger with 'spam_application'
     logger = logging.getLogger(logger_name)

@@ -20,7 +20,7 @@ __ON = "ON"
 __OFF = "OFF"
 
 
-def __execute_command(cmd: str) -> ErrorCodes:
+def _execute_command(cmd: str) -> ErrorCodes:
     """ Simple function to execute a shell command
     :param cmd: command string
     :return: ErrorCodes enum
@@ -33,7 +33,7 @@ def __execute_command(cmd: str) -> ErrorCodes:
     return ErrorCodes.SUCCESS
 
 
-def __lindy_switch(status: str, switch_port: int, switch_ip: str, logger: logging.Logger) -> ErrorCodes:
+def _lindy_switch(status: str, switch_port: int, switch_ip: str, logger: logging.Logger) -> ErrorCodes:
     """ Lindy switch reboot rules
     :param status: ON or OFF
     :param switch_port: port to reboot
@@ -89,7 +89,7 @@ def __lindy_switch(status: str, switch_port: int, switch_ip: str, logger: loggin
     return reboot_status
 
 
-def __common_switch_command(status: str, switch_ip: str, switch_port: int) -> ErrorCodes:
+def _common_switch_command(status: str, switch_ip: str, switch_port: int) -> ErrorCodes:
     """Common switch reboot rules
     :param status: ON or OFF
     :param switch_ip: ip address for the switch
@@ -104,11 +104,11 @@ def __common_switch_command(status: str, switch_ip: str, switch_port: int) -> Er
     cmd += '&Apply=Apply\" '
     cmd += f'http://%s/tgi/iocontrol.tgi {switch_ip}'
     cmd += '-o /dev/null '
-    return __execute_command(cmd)
+    return _execute_command(cmd)
 
 
-def __select_command_on_switch(status: str, switch_model: str, switch_port: int, switch_ip: str,
-                               logger: logging.Logger) -> ErrorCodes:
+def _select_command_on_switch(status: str, switch_model: str, switch_port: int, switch_ip: str,
+                              logger: logging.Logger) -> ErrorCodes:
     """Select the switch and execute the command
     :param status: ON or OFF
     :param switch_model: model of the switch. Supported now default and lindy
@@ -118,9 +118,9 @@ def __select_command_on_switch(status: str, switch_model: str, switch_port: int,
     :return: ErrorCodes enum, if the switch is not defined it will trow a ValueError exception
     """
     if switch_model == "default":
-        return __common_switch_command(status, switch_ip, switch_port)
+        return _common_switch_command(status, switch_ip, switch_port)
     elif switch_model == "lindy":
-        return __lindy_switch(status, switch_port, switch_ip, logger)
+        return _lindy_switch(status, switch_port, switch_ip, logger)
     else:
         raise ValueError("Incorrect switch set to switch_model")
 
@@ -138,16 +138,32 @@ def reboot_machine(address: str, switch_model: str, switch_port: int, switch_ip:
     """
     logger = logging.getLogger(logger_name)
     logger.info(f"Rebooting machine: {address}, switch IP: {switch_ip}, switch switch_port: {switch_port}")
-    off_status = __select_command_on_switch(status=__OFF, switch_model=switch_model, switch_port=switch_port,
-                                            switch_ip=switch_ip, logger=logger)
-    time.sleep(rebooting_sleep)
-    on_status = __select_command_on_switch(status=__ON, switch_model=switch_model, switch_port=switch_port,
+    off_status = _select_command_on_switch(status=__OFF, switch_model=switch_model, switch_port=switch_port,
                                            switch_ip=switch_ip, logger=logger)
+    time.sleep(rebooting_sleep)
+    on_status = _select_command_on_switch(status=__ON, switch_model=switch_model, switch_port=switch_port,
+                                          switch_ip=switch_ip, logger=logger)
     return off_status, on_status
+
+
+def turn_machine_on(address: str, switch_model: str, switch_port: int, switch_ip: str, logger_name: str) -> ErrorCodes:
+    """Public function to turn ON a machine
+    :param address: Address of the machine that is being rebooted
+    :param switch_model: model of the switch. Supported now default and lindy
+    :param switch_port: port to reboot
+    :param switch_ip: ip address for the switch
+    :param logger_name: logger name defined in the main setup module
+    :return: ErrorCodes status
+    """
+    logger = logging.getLogger(logger_name)
+    logger.info(f"Turning ON machine: {address}, switch IP: {switch_ip}, switch switch_port: {switch_port}")
+    return _select_command_on_switch(status=__ON, switch_model=switch_model, switch_port=switch_port,
+                                     switch_ip=switch_ip, logger=logger)
 
 
 if __name__ == '__main__':
     # FOR DEBUG ONLY
+    # TODO: DEBUG the functions
     print("CREATING THE RebootMachine")
     logging.basicConfig(
         level=logging.DEBUG,
