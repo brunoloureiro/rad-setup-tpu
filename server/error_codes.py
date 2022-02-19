@@ -2,8 +2,7 @@ from enum import Enum
 
 
 class ErrorCodes(Enum):
-    """
-    Error codes used to identify status in this test
+    """Error codes used to identify status in this test
     """
     SUCCESS = 0
 
@@ -21,9 +20,8 @@ class ErrorCodes(Enum):
     CONNECTION_ERROR = 9
     TIMEOUT_ERROR = 10
 
-    def __str__(self):
-        """
-        Override the str method
-        :return:
+    def __str__(self) -> str:
+        """Override the str method
+        :return: the name of the enum as string
         """
         return self.name
