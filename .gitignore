@@ -135,5 +135,5 @@ logger/release
 logger/*.so
 
 .idea
-*.log
 */*.log
+debug

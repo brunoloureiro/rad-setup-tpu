@@ -2,7 +2,6 @@
 #define LOG_HELPER_TCP_H
 
 #include <iostream>
-#include <zmq.hpp>
 #include "log_helper_base.h"
 
 namespace log_helper {
@@ -10,32 +9,22 @@ namespace log_helper {
 
     class log_helper_tcp : public virtual log_helper_base {
         //TODO: this must be read from a file
-        std::string server_ip = "tcp://localhost:5555";
-        int32_t port = 0;
-        zmq::socket_t socket;
-        zmq::context_t context;
+        std::string server_ip = "127.0.0.1";
+        int32_t port = 1024;
     public:
 
         log_helper_tcp(const std::string &benchmark_name, const std::string &test_info)
                 : log_helper_base(benchmark_name, test_info) {
 
             //  Prepare our context and socket
-            this->context = zmq::context_t(1);
-            this->socket = zmq::socket_t(context, ZMQ_REQ);
 
 #ifdef DEBUG
-            std::cout << "Connecting to hello world server..." << std::endl;
+            std::cout << "Connecting to server..." << std::endl;
 #endif
-            socket.connect(this->server_ip);
         }
 
         uint8_t start_iteration() final {
-            log_helper_base::start_iteration();
-
-            const std::string start_it = "START_IT";
-            zmq::message_t request(start_it.begin(), start_it.end());
-            size_t sent_size = *this->socket.send(request, zmq::send_flags::none);
-            return sent_size != start_it.size();
+            return log_helper_base::start_iteration();
         }
 
         uint8_t end_iteration() final {
