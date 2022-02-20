@@ -6,20 +6,31 @@ import os
 
 from datetime import datetime
 
+END_STATUS = dict(
+    NORMAL_END="#END",
+    SAME_ERROR_LAST_ITERATION="#ABORT: amount of errors equals of the last iteration",
+    TOO_MANY_ERRORS="#ABORT: too many errors per iteration",
+    SYSTEM_CRASH="#DUE: system crash",
+    POWER_CYCLE="#DUE: power cycle",
+)
 
-class EndStatus(enum.Enum):
-    # Test ending status can be normal end, system crash, power cycle
-    NORMAL_END = "#END"
-    SYSTEM_CRASH = "#DUE: system crash"
-    POWER_CYCLE = "#DUE: power cycle"
-    TOO_MANY_ERRORS = "#ABORT: too many errors per iteration"
-    SAME_ERROR_LAST_ITERATION = "#ABORT: amount of errors equals of the last iteration"
 
-    def __str__(self) -> str:
-        """ Class to string
-        :return: string
-        """
-        return str(self.value)
+class MessageType(enum.IntEnum):
+    """ Message types defined for the communication """
+    CREATE_HEADER = 0
+    ITERATION_TIME = 1
+    ERROR_DETAIL = 2
+    INFO_DETAIL = 3
+    SDC_END = 4
+    TOO_MANY_ERRORS_PER_ITERATION = 5
+    TOO_MANY_INFOS_PER_ITERATION = 6
+    NORMAL_END = 7
+    SAME_ERROR_LAST_ITERATION = 8
+
+    # Method to perform to string
+    def __str__(self) -> str: return str(self.name)
+    # Representation is the same as to string
+    def __repr__(self) -> str: return str(self)
 
 
 class DUTLogging:
@@ -49,7 +60,7 @@ class DUTLogging:
             log_file.write(begin_str)
 
         # This var will be set to false in case the machine stops responding and a DUE is logged
-        self.__test_ending_status = EndStatus.NORMAL_END
+        self.__test_ending_status = END_STATUS["NORMAL_END"]
 
     def __del__(self):
         """ Destructor of the class
@@ -60,7 +71,7 @@ class DUTLogging:
                 date_fmt = datetime.today().strftime('%Y-%m-%d-%H-%M-%S')
                 log_file.write(f"({date_fmt}) {self.__test_ending_status}")
 
-    def set_end_status(self, ending_status: EndStatus = EndStatus.NORMAL_END) -> None:
+    def set_end_status(self, ending_status: str = END_STATUS["NORMAL_END"]) -> None:
         """ Set the end to the log file
         :param ending_status: Enum that represents the possible endings
         :return: None
