@@ -31,7 +31,7 @@ namespace log_helper {
 
     } MessageType;
 
-    class log_helper_tcp : public virtual log_helper_base {
+    class log_helper_udp : public virtual log_helper_base {
         //TODO: this must be read from a file
         std::string server_ip;
         int32_t port;
@@ -66,7 +66,7 @@ namespace log_helper {
 
     public:
 
-        log_helper_tcp(const std::string &benchmark_name, const std::string &test_info)
+        log_helper_udp(const std::string &benchmark_name, const std::string &test_info)
                 : log_helper_base(benchmark_name, test_info), server_address({}) {
             this->server_ip = this->configuration_parameters["server_ip"];
             this->port = std::stoi(this->configuration_parameters["port"]);

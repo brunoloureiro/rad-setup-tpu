@@ -10,7 +10,7 @@ END_STATUS = dict(
     NORMAL_END="#END",
     SAME_ERROR_LAST_ITERATION="#ABORT: amount of errors equals of the last iteration",
     TOO_MANY_ERRORS="#ABORT: too many errors per iteration",
-    SYSTEM_CRASH="#DUE: system crash",
+    APPLICATION_CRASH="#DUE: system crash",
     POWER_CYCLE="#DUE: power cycle",
 )
 
