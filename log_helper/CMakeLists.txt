@@ -30,3 +30,5 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(LogHelper)
 
 install(FILES ${CMAKE_BINARY_DIR}/logHelper.pc DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/pkgconfig)
+
+add_subdirectory(examples)
