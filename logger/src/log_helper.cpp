@@ -1,5 +1,5 @@
 #include "log_helper_base.h"
-#include "log_helper_tcp.h"
+#include "log_helper_udp.h"
 #include "log_helper.h"
 
 #include <cstring>
@@ -44,8 +44,8 @@ void get_log_file_name(char *log_file_name) {
         auto log_file_name_str = log_helper_ptr->get_log_file_name();
         if (std::strlen(log_file_name) < log_file_name_str.size()) {
             throw std::out_of_range(
-                    "String passed as parameter has smaller size than the logfilename file - " +
-                    std::string(__FILE__) + ":" + std::to_string(__LINE__));
+                    log_helper::EXCEPTION_LINE("String passed as parameter has smaller size than the logfilename ")
+                    );
         }
         std::copy(log_file_name_str.begin(), log_file_name_str.end(), log_file_name);
     }

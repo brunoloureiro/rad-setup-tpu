@@ -11,7 +11,7 @@ add_library(
         LogHelper SHARED
         src/log_helper.cpp
         include/log_helper.h
-        include/log_helper_tcp.h
+        include/log_helper_udp.h
         include/log_helper_base.h
 )
 

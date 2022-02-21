@@ -9,8 +9,20 @@
 #include <iomanip>
 #include <chrono>
 #include <utility>
+#include <unordered_map>
+#include <fstream>
+#include <vector>
+#include <iterator>
 
 namespace log_helper {
+    std::string _exception_info(const std::string& message, const std::string& file, int line) {
+        return message + " - FILE:" + file + ":" + std::to_string(line);
+    }
+
+#define EXCEPTION_LINE(message) _exception_info(message, __FILE__, __LINE__)
+
+    // Type that will be used to represent the data form the CFG file
+    using config_map = std::unordered_map<std::string, std::string>;
 
     class log_helper_base {
     public:
@@ -22,7 +34,7 @@ namespace log_helper {
         }
 
         virtual uint8_t end_iteration() {
-            std::chrono::duration<double> difference = std::chrono::system_clock::now() -  this->it_time_start;
+            std::chrono::duration<double> difference = std::chrono::system_clock::now() - this->it_time_start;
             this->kernel_time = difference.count();
             this->kernel_time_acc += this->kernel_time;
 
@@ -30,12 +42,12 @@ namespace log_helper {
             this->log_info_detail_counter = 0;
 
             if (this->iteration_number % this->iter_interval_print == 0) {
-                this->end_iteration_generated_string = "#IT Ite:" + std::to_string(this->iteration_number) +
-                        " KerTime:" + std::to_string(this->kernel_time) +
-                        " AccTime:" + std::to_string(this->kernel_time_acc);
-            }else{
+                this->end_iteration_string = "#IT Ite:" + std::to_string(this->iteration_number) +
+                                             " KerTime:" + std::to_string(this->kernel_time) +
+                                             " AccTime:" + std::to_string(this->kernel_time_acc);
+            } else {
                 //does not write if it's empty
-                this->end_iteration_generated_string = "";
+                this->end_iteration_string = "";
             }
             this->iteration_number++;
             return 0;
@@ -83,18 +95,79 @@ namespace log_helper {
         virtual ~log_helper_base() = default;
 
     protected:
+        /**
+         * Base constructor for log_helper
+         * @param benchmark_name
+         * @param test_info
+         */
         log_helper_base(std::string benchmark_name, std::string test_info)
                 : benchmark_name(std::move(benchmark_name)), header(std::move(test_info)) {
+            // Necessary for all configurations (network or local)
+            this->read_configuration_file();
+        }
+
+        /**
+         * Read a configuration file from the default path
+         */
+        void read_configuration_file() {
+            std::ifstream config_file(this->config_file_path);
+            // split string
+            auto split = [](std::string &string_to_split) {
+                std::vector<std::string> tokens;
+                std::string token;
+                std::istringstream token_stream(string_to_split);
+                while (std::getline(token_stream, token, '=')) {
+                    tokens.push_back(token);
+                }
+                return tokens;
+            };
+            constexpr char whitespace[] = " \t\r\n\v\f";
+
+            // trim leading white-spaces
+            auto ltrim = [&whitespace](std::string &s) {
+                size_t start_pos = s.find_first_not_of(whitespace);
+                if (std::string::npos != start_pos) {
+                    s = s.substr(start_pos);
+                }
+                return s;
+            };
+
+            // trim trailing white-spaces
+            auto rtrim = [&whitespace](std::string &s) {
+                size_t end_pos = s.find_last_not_of(whitespace);
+                if (std::string::npos != end_pos) {
+                    s = s.substr(0, end_pos + 1);
+                }
+                return s;
+            };
+
+            // Parse the lines of the configuration file and stores in the map
+            if (config_file.good()) {
+                for (std::string line; std::getline(config_file, line);) {
+                    if (!line.empty() && line[0] != '#') {
+                        line = ltrim(line);
+                        line = rtrim(line);
+                        auto split_line = split(line);
+                        auto key = split_line[0];
+                        auto value = split_line[1];
+                        this->configuration_parameters[key] = value;
+                    }
+                }
+            } else {
+                std::throw_with_nested(std::runtime_error("Couldn't open " + this->config_file_path));
+            }
         }
 
         // does not change over the time
-        static constexpr char config_file[] = "/etc/radiation-benchmarks.conf";
-        static constexpr char var_dir_key[] = "vardir";
+        // static constexpr char config_file[] = "/etc/radiation-benchmarks.conf";
+        // Default path to the config file
+        const std::string config_file_path = "/etc/radiation-benchmarks.conf";
+        config_map configuration_parameters;
 
         std::string log_file_name;
         std::string header;
         std::string benchmark_name;
-        std::string end_iteration_generated_string;
+        std::string end_iteration_string;
 
         // Max errors that can be found for a single iteration
         // If more than max errors is found, exit the program
