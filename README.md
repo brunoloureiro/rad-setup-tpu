@@ -1,6 +1,6 @@
 # Setup for radiation experiments
 
-This repository contains the libraries and scripts necessary to execute a beam experiment setup for radiation experiments.
+This repository contains the libraries and scripts necessary to create a beam experiment setup.
 
 # Getting started
 
