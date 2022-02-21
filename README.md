@@ -41,6 +41,7 @@ TODO
 
 # Contribute
 
-The Python modules development follows (or at least we try) the PEP8 development rules. 
+The Python modules development follows (or at least we try) the 
+[PEP8](https://www.python.org/dev/peps/pep-0008/) development rules. 
 On the client side, we try to be as straightforward as possible.
 If you wish to collaborate, submit a pull request.
