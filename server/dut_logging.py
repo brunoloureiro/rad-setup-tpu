@@ -42,7 +42,7 @@ class DUTLogging:
     def __init__(self, log_dir: str, test_name: str, test_header: str, hostname: str, ecc_config: str = "OFF"):
         """ DUTLogging create the log file and writes the header on the first line
         :param log_dir: directory of the logfile
-        :param test_name: Name of the test that will be perform, ex: cuda_lava_fp16, zedboard_lenet_int8, etc.
+        :param test_name: Name of the test that will be performed, ex: cuda_lava_fp16, zedboard_lenet_int8, etc.
         :param test_header: Specific characteristics of the test, extracted from the configuration files
         :param hostname: Device hostname
         :param ecc_config: ECC configuration of the memories, can be ON or OFF. Default is OFF

@@ -28,6 +28,7 @@ boot_problem_max_delta: 300
 #:param diff_reboot delta to wait before reboot again
 #:param hostname the hostname of the machine, that must contains the device in the name
 #:param username
+#:param password of the device
 #:param power_switch_ip IP address of the power switch
 #:param power_switch_port outlet of the power switch
 #:param power_switch_model brand of the power switch
@@ -38,6 +39,7 @@ machines: [
     "diff_reboot": 100,
     "hostname": "fernando",
     "username": "fernando",
+    "password": "qwerty0",
     "power_switch_ip": "192.168.1.102",
     "power_switch_port": 1,
     "power_switch_model": "lindy",
@@ -48,6 +50,7 @@ machines: [
     "diff_reboot": 100,
     "hostname": "pynq",
     "username": "xilinx",
+    "password": "qwerty0",
     "power_switch_ip": "192.168.1.101",
     "power_switch_port": 1,
     "power_switch_model": "lindy",
@@ -59,6 +62,7 @@ machines: [
     "diff_reboot": 100,
     "hostname": "carolnano1",
     "username": "carol",
+    "password": "qwerty0",
     "power_switch_ip": "192.168.1.102",
     "power_switch_port": 2,
     "power_switch_model": "lindy",
@@ -70,6 +74,7 @@ machines: [
     "diff_reboot": 100,
     "hostname": "carolk401",
     "username": "carol",
+    "password": "qwerty0",
     "power_switch_ip": "192.168.1.102",
     "power_switch_port": 1,
     "power_switch_model": "lindy",

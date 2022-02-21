@@ -2,9 +2,11 @@
 import argparse
 import logging
 import os
-import typing
-import yaml
 import socketserver
+import typing
+
+import yaml
+
 from logger_formatter import ColoredLogger
 from machine import Machine
 
@@ -81,7 +83,7 @@ def main():
     logger_name = __name__
     logger = logging_setup(logger_name=logger_name, log_file=server_log_file)
 
-    # Create a dictionary that will contains all the active Machine threads in the setup
+    # Create a dictionary that will contain all the active Machine threads in the setup
     machines_dict = dict()
     for m in server_parameters["machines"]:
         if m['enabled']:
@@ -94,7 +96,7 @@ def main():
                 boot_problem_max_delta=boot_problem_max_delta,
                 power_cycle_sleep_time=hard_reboot_sleep_time, dut_log_path=dut_log_path,
             )
-            # If path does not exists create it
+            # If path does not exist create it
             if os.path.isdir(dut_log_path) is False:
                 os.mkdir(dut_log_path)
             machines_dict[m["ip"]] = new_machine
