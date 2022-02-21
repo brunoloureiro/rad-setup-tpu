@@ -26,14 +26,13 @@ namespace log_helper {
 
     class log_helper_base {
     public:
-        virtual uint8_t start_iteration() {
+        virtual void start_iteration() {
             this->log_error_detail_counter = 0;
             this->log_info_detail_counter = 0;
             this->it_time_start = std::chrono::system_clock::now();
-            return 0;
         }
 
-        virtual uint8_t end_iteration() {
+        virtual void end_iteration() {
             std::chrono::duration<double> difference = std::chrono::system_clock::now() - this->it_time_start;
             this->kernel_time = difference.count();
             this->kernel_time_acc += this->kernel_time;
@@ -50,34 +49,30 @@ namespace log_helper {
                 this->end_iteration_string = "";
             }
             this->iteration_number++;
-            return 0;
         }
 
-        virtual uint8_t log_error_count(size_t kernel_errors) = 0;
+        virtual void log_error_count(size_t kernel_errors) = 0;
 
-        virtual uint8_t log_info_count(size_t info_count) = 0;
+        virtual void log_info_count(size_t info_count) = 0;
 
-        virtual uint8_t log_error_detail(const std::string &string) = 0;
+        virtual void log_error_detail(const std::string &string) = 0;
 
-        virtual uint8_t log_info_detail(const std::string &string) = 0;
+        virtual void log_info_detail(const std::string &string) = 0;
 
-        size_t set_max_errors_iter(size_t max_errors) {
+        void set_max_errors_iter(size_t max_errors) {
             this->max_errors_per_iter = max_errors;
-            return this->max_errors_per_iter;
         }
 
-        size_t set_max_infos_iter(size_t max_infos) {
+        void set_max_infos_iter(size_t max_infos) {
             this->max_infos_per_iter = max_infos;
-            return this->max_infos_per_iter;
         }
 
-        size_t set_iter_interval_print(size_t interval) {
+        void set_iter_interval_print(size_t interval) {
             if (interval < 1) {
                 this->iter_interval_print = 1;
             } else {
                 this->iter_interval_print = interval;
             }
-            return this->iter_interval_print;
         }
 
         void disable_double_error_kill() {
@@ -86,10 +81,6 @@ namespace log_helper {
 
         std::string get_log_file_name() {
             return this->log_file_name;
-        }
-
-        size_t get_iteration_number() const {
-            return this->iteration_number;
         }
 
         virtual ~log_helper_base() = default;
@@ -195,8 +186,6 @@ namespace log_helper {
         // Used to log max_error_per_iter details each iteration
         size_t log_error_detail_counter = 0;
         size_t log_info_detail_counter = 0;
-
-
         bool double_error_kill = true;
     };
 

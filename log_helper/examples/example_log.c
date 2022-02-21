@@ -7,10 +7,8 @@ int main() {
 
     // Start the log with filename including "my_benchmark" to its name, and
     // header inside log file will print the detail "size:x repetition:y"
-    if (start_log_file((char *) "my_benchmark", (char *) "size:x repetition:y")) {
-        fprintf(stderr, "Could not start log file");
-        exit(1);
-    }
+    start_log_file((char *) "my_benchmark", (char *) "size:x repetition:y");
+
     // set the maximum number of errors allowed for each iteration,
     // default is 500
     set_max_errors_iter(32);

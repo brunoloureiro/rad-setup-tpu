@@ -38,7 +38,7 @@ namespace log_helper {
         int32_t client_socket;
         struct sockaddr_in server_address;
 
-        uint8_t send_message(std::string &message, MessageType message_type) {
+        void send_message(std::string &message, MessageType message_type) {
             std::string data_string = std::to_string(message_type) + message;
 
             auto error = sendto(this->client_socket, data_string.data(), BUFFER_SIZE,
@@ -48,19 +48,18 @@ namespace log_helper {
             if (error < 0) {
                 std::cerr << EXCEPTION_LINE("Could not send the message " + data_string) << std::endl;
             }
-            return 1;
         }
 
-        uint8_t start_log_file(const std::string &benchmark_name, const std::string &test_info) {
+        void start_log_file(const std::string &benchmark_name, const std::string &test_info) {
             // The header message will be organized in the follow manner
             // | 1 byte message type | 1 byte benchmark_name string size | benchmark_name string | header content
             auto name_size = benchmark_name.size();
             if (name_size > 255) {
-                throw std::runtime_error(EXCEPTION_LINE("BENCHMARK_NAME cannot be larger than 1 byte"));
+                std::cerr << EXCEPTION_LINE("BENCHMARK_NAME cannot be larger than 1 byte") << std::endl;
             }
             auto final_message = std::to_string(name_size) + benchmark_name + test_info;
 
-            return this->send_message(final_message, CREATE_HEADER);
+            this->send_message(final_message, CREATE_HEADER);
         }
 
     public:
@@ -79,39 +78,34 @@ namespace log_helper {
             // store this IP address in sa:
             inet_pton(AF_INET, this->server_ip.c_str(), &(this->server_address.sin_addr.s_addr));
             if (client_socket < -1) {
-                std::throw_with_nested(EXCEPTION_LINE("Could not create a socket"));
+                std::cerr << EXCEPTION_LINE("Could not create a socket") << std::endl;
             }
 
             this->start_log_file(benchmark_name, test_info);
         }
 
-        uint8_t start_iteration() final {
-            return log_helper_base::start_iteration();
+        void start_iteration() final {
+            log_helper_base::start_iteration();
         }
 
-        uint8_t end_iteration() final {
+        void end_iteration() final {
             log_helper_base::end_iteration();
             if (!this->end_iteration_string.empty()) {
-                return this->send_message(this->end_iteration_string, ITERATION_TIME);
+                this->send_message(this->end_iteration_string, ITERATION_TIME);
             }
-            return 1;
         }
 
-        uint8_t log_error_count(size_t kernel_errors) final {
-            return 0;
+        void log_error_count(size_t kernel_errors) final {
         }
 
-        uint8_t log_info_count(size_t info_count) final {
-            return 0;
+        void log_info_count(size_t info_count) final {
         }
 
-        uint8_t log_error_detail(const std::string &string) final {
+        void log_error_detail(const std::string &string) final {
             std::cout << string << std::endl;
-            return 0;
         }
 
-        uint8_t log_info_detail(const std::string &string) final {
-            return 0;
+        void log_info_detail(const std::string &string) final {
         }
     };
 }
