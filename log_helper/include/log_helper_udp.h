@@ -10,7 +10,7 @@
 #include "log_helper_base.h"
 
 namespace log_helper {
-#define DEBUG 1
+
 #define BUFFER_SIZE 1024
     /**
      * Based on the server messages
@@ -38,7 +38,11 @@ namespace log_helper {
         int32_t client_socket;
         struct sockaddr_in server_address;
 
-        uint8_t send_message(std::vector<uint8_t> &message) {
+        uint8_t send_message(std::string &message, MessageType message_type) {
+            std::vector<uint8_t> buffer(BUFFER_SIZE, 0);
+            buffer[0] = message_type;
+            std::copy(message.begin(), message.end(), buffer.begin() + 1);
+
             auto error = sendto(this->client_socket, message.data(), BUFFER_SIZE,
                                 MSG_CONFIRM, (const struct sockaddr *) &this->server_address,
                                 sizeof(this->server_address));
@@ -46,6 +50,18 @@ namespace log_helper {
                 std::throw_with_nested(EXCEPTION_LINE("Could not send the message"));
             }
             return 1;
+        }
+
+        uint8_t start_log_file(const std::string &benchmark_name, const std::string &test_info) {
+            // The header message will be organized in the follow maner
+            // | 1 byte message type | 1 byte benchmark_name string size | benchmark_name string | header content
+            auto name_size = benchmark_name.size();
+            if (name_size > 255) {
+                throw std::runtime_error(EXCEPTION_LINE("BENCHMARK_NAME cannot be larger than 255chars"));
+            }
+            auto final_message = std::to_string(name_size) + benchmark_name + test_info;
+
+            return this->send_message(final_message, CREATE_HEADER);
         }
 
     public:
@@ -68,9 +84,7 @@ namespace log_helper {
                 std::throw_with_nested(EXCEPTION_LINE("Could not create a socket"));
             }
 
-#ifdef DEBUG
-            std::cout << "Connecting to server..." << std::endl;
-#endif
+            this->start_log_file(benchmark_name, test_info);
         }
 
         uint8_t start_iteration() final {
@@ -80,16 +94,8 @@ namespace log_helper {
         uint8_t end_iteration() final {
             log_helper_base::end_iteration();
             if (!this->end_iteration_string.empty()) {
-                static std::vector<uint8_t> buffer(BUFFER_SIZE);
-                std::fill(buffer.begin(), buffer.end(), 0);
-                buffer[0] = ITERATION_TIME;
-                std::copy(this->end_iteration_string.begin(),
-                          this->end_iteration_string.end(),
-                          buffer.begin() + 1);
-                return this->send_message(buffer);
+                return this->send_message(this->end_iteration_string, ITERATION_TIME);
             }
-
-
             return 1;
         }
 

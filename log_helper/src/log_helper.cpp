@@ -45,7 +45,7 @@ void get_log_file_name(char *log_file_name) {
         if (std::strlen(log_file_name) < log_file_name_str.size()) {
             throw std::out_of_range(
                     log_helper::EXCEPTION_LINE("String passed as parameter has smaller size than the logfilename ")
-                    );
+            );
         }
         std::copy(log_file_name_str.begin(), log_file_name_str.end(), log_file_name);
     }

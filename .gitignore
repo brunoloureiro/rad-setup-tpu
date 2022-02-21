@@ -137,3 +137,5 @@ logger/*.so
 .idea
 */*.log
 debug
+log_helper/cmake-build-debug
+log_helper/cmake-build-release
