@@ -39,25 +39,24 @@ namespace log_helper {
         struct sockaddr_in server_address;
 
         uint8_t send_message(std::string &message, MessageType message_type) {
-            std::vector<uint8_t> buffer(BUFFER_SIZE, 0);
-            buffer[0] = message_type;
-            std::copy(message.begin(), message.end(), buffer.begin() + 1);
+            std::string data_string = std::to_string(message_type) + message;
 
-            auto error = sendto(this->client_socket, message.data(), BUFFER_SIZE,
+            auto error = sendto(this->client_socket, data_string.data(), BUFFER_SIZE,
                                 MSG_CONFIRM, (const struct sockaddr *) &this->server_address,
                                 sizeof(this->server_address));
+
             if (error < 0) {
-                std::throw_with_nested(EXCEPTION_LINE("Could not send the message"));
+                std::cerr << EXCEPTION_LINE("Could not send the message " + data_string) << std::endl;
             }
             return 1;
         }
 
         uint8_t start_log_file(const std::string &benchmark_name, const std::string &test_info) {
-            // The header message will be organized in the follow maner
+            // The header message will be organized in the follow manner
             // | 1 byte message type | 1 byte benchmark_name string size | benchmark_name string | header content
             auto name_size = benchmark_name.size();
             if (name_size > 255) {
-                throw std::runtime_error(EXCEPTION_LINE("BENCHMARK_NAME cannot be larger than 255chars"));
+                throw std::runtime_error(EXCEPTION_LINE("BENCHMARK_NAME cannot be larger than 1 byte"));
             }
             auto final_message = std::to_string(name_size) + benchmark_name + test_info;
 
@@ -70,7 +69,6 @@ namespace log_helper {
                 : log_helper_base(benchmark_name, test_info), server_address({}) {
             this->server_ip = this->configuration_parameters["server_ip"];
             this->port = std::stoi(this->configuration_parameters["port"]);
-
             //  Prepare our context and socket
             // Filling server information
             this->client_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);

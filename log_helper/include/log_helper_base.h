@@ -126,19 +126,21 @@ namespace log_helper {
             // trim leading white-spaces
             auto ltrim = [&whitespace](std::string &s) {
                 size_t start_pos = s.find_first_not_of(whitespace);
+                auto ret = s;
                 if (std::string::npos != start_pos) {
-                    s = s.substr(start_pos);
+                    ret = ret.substr(start_pos);
                 }
-                return s;
+                return ret;
             };
 
             // trim trailing white-spaces
             auto rtrim = [&whitespace](std::string &s) {
                 size_t end_pos = s.find_last_not_of(whitespace);
+                auto ret = s;
                 if (std::string::npos != end_pos) {
-                    s = s.substr(0, end_pos + 1);
+                    ret = ret.substr(0, end_pos + 1);
                 }
-                return s;
+                return ret;
             };
 
             // Parse the lines of the configuration file and stores in the map
@@ -148,8 +150,10 @@ namespace log_helper {
                         line = ltrim(line);
                         line = rtrim(line);
                         auto split_line = split(line);
-                        auto key = split_line[0];
-                        auto value = split_line[1];
+                        auto key = ltrim(split_line[0]);
+                        key = rtrim(key);
+                        auto value = ltrim(split_line[1]);
+                        value = rtrim(value);
                         this->configuration_parameters[key] = value;
                     }
                 }
