@@ -26,6 +26,7 @@ The client-side is based on C++, and the following dependencies are required:
 
 - C++ 14
 - CMake >=3.16**
+- Telnet server (any version)
 
 ## Installing
 
