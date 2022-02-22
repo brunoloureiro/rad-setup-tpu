@@ -1,7 +1,7 @@
 import socket
-from multiprocessing import Process
+from threading import Thread
 import os
-from multiprocessing import Lock
+from threading import Lock
 from time import sleep
 s_print_lock = Lock()
 udp=socket.SOCK_DGRAM
@@ -33,9 +33,9 @@ def recv(recv_port):
 
 
 if __name__ == '__main__':
-    recv_t= Process(target=recv,args=(10002,))
-    recv_t2= Process(target=recv,args=(10003,))
-    recv_t3= Process(target=recv,args=(10004,))
+    recv_t= Thread(target=recv,args=(10002,))
+    recv_t2= Thread(target=recv,args=(10003,))
+    recv_t3= Thread(target=recv,args=(10004,))
 
     recv_t2.start()
     recv_t.start()
