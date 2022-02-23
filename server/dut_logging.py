@@ -17,7 +17,6 @@ END_STATUS = dict(
 
 class MessageType(enum.IntEnum):
     """ Message types defined for the communication """
-    CREATE_HEADER = 0
     ITERATION_TIME = 1
     ERROR_DETAIL = 2
     INFO_DETAIL = 3

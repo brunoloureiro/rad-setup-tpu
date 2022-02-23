@@ -1,9 +1,12 @@
 import errno
+import logging
+import os
+import socket
 import telnetlib
 import threading
 import time
-import logging
-import socket
+
+import yaml
 
 from dut_logging import DUTLogging, MessageType
 from error_codes import ErrorCodes
@@ -20,58 +23,49 @@ class Machine(threading.Thread):
     __TIME_MAX_REBOOT_THRESHOLD = 10
     __REBOOT_AGAIN_INTERVAL_AFTER_BOOT_PROBLEM = 3600
 
-    def __init__(self,
-                 ip: str, receiving_port: int, diff_reboot: float, hostname: str, power_switch_ip: str,
-                 power_switch_port: int,
-                 power_switch_model: str, logger_name: str, boot_problem_max_delta: float,
-                 power_cycle_sleep_time: float, dut_log_path: str,
-                 sdc_data_size: int, max_timeout_time:int, username: str, dut_passwd: str, dut_app_path: str, exec_code: str,
-                 app_args: str, *args, **kwargs):
+    # Data receive size in bytes
+    __SDC_DATA_SIZE = 1024
+
+    def __init__(self, configuration_file: str, receiving_port: int, logger_name: str, server_log_path: str, *args,
+                 **kwargs):
         """ Initialize a new thread that represents a setup machine
-        :param ip: Machine' IP
+        :param configuration_file: YAML file that contains all information from
         :param receiving_port: port fro receiving messages from the DUT
-        :param diff_reboot: Difference threshold to wait between the connections of the device
-        :param hostname: Hostname of the device
-        :param power_switch_ip: IP address of the power switch that the device is connected
-        :param power_switch_port: Power switch port that the device is connected
-        :param power_switch_model: Model (type/brand) of the power switch
         :param logger_name: Main logger name to store the logging information
-        :param boot_problem_max_delta: Delta time necessary to take some action after boot problem
-        :param power_cycle_sleep_time: difference between OFF and ON when rebooting
-        :param dut_log_path: directory to store the logs for the test
-        :paran sdc_data_size: size of the SDC message
-        :param max_timeout_time: maximum waiting time for messages
-        :param username: DUT username
-        :param dut_passwd: DUT password
-        :param dut_app_path: path where is the application and input files
-        :param exec_code: name the application running
-        :param app_args: arguments for the application running
-        # TODO: CHeck if the approach will use this way of setting the parameters
+        :param server_log_path: directory to store the logs for the test
+        :param *args: args that will be passed to threading.Thread
+        :param *kwargs: kwargs that will be passed to threading.Thread
         """
-        self.__ip = ip
-        self.__diff_reboot = diff_reboot
-        self.__hostname = hostname
-        self.__switch_ip = power_switch_ip
-        self.__switch_port = power_switch_port
-        self.__switch_model = power_switch_model
+        # load yaml file
+        with open(configuration_file, 'r') as fp:
+            machine_parameters = yaml.load(fp, Loader=yaml.SafeLoader)
+        self.__ip = machine_parameters["ip"]
+        self.__diff_reboot = machine_parameters["diff_reboot"]
+        self.__switch_ip = machine_parameters["power_switch_ip"]
+        self.__switch_port = machine_parameters["power_switch_port"]
+        self.__switch_model = machine_parameters["power_switch_model"]
+        self.__boot_problem_max_delta = machine_parameters["boot_problem_max_delta"]
+        self.__reboot_sleep_time = machine_parameters["power_cycle_sleep_time"]
+        self.__max_timeout_time = machine_parameters["max_timeout_time"]
+        self.__dut_hostname = machine_parameters["hostname"]
+        self.__dut_username = machine_parameters["username"]
+        self.__dut_password = machine_parameters["dut_passwd"]
+
         self.__logger_name = logger_name
-        self.__boot_problem_max_delta = boot_problem_max_delta
-        self.__reboot_sleep_time = power_cycle_sleep_time
-        self.__timestamp = time.time()
         self.__logger = logging.getLogger(self.__logger_name)
         self.__stop_event = threading.Event()
         self.__reboot_status = ErrorCodes.SUCCESS
-        self.__dut_log_path = dut_log_path
+        self.__dut_log_path = f"{server_log_path}/{self.__dut_hostname}"
+        # make sure that the path exists
+        if os.path.isdir(self.__dut_log_path) is False:
+            os.mkdir(self.__dut_log_path)
+
         self.__receiving_port = receiving_port
+        self.__timestamp = time.time()
+
         self.__dut_log_obj = None
-        self.__sdc_data_size = sdc_data_size
+        # Configure the socket
         self.__messages_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.__max_timeout_time = max_timeout_time
-        self.__username = username
-        self.__dut_passwd = dut_passwd
-        self.__dut_app_path = dut_app_path
-        self.__exec_code = exec_code
-        self.__app_args = app_args
         self.__messages_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.__messages_socket.bind((self.get_self_ip_address(), self.__receiving_port))
         self.__messages_socket.settimeout(self.__max_timeout_time)
@@ -93,7 +87,7 @@ class Machine(threading.Thread):
         #           - At the destruction of the class or stop of the server the Machine MUST close all log files
         while self.__stop_event.is_set():
             try:
-                data, addr = self.__messages_socket.recvfrom(self.__sdc_data_size)
+                data, addr = self.__messages_socket.recvfrom(self.__SDC_DATA_SIZE)
             except socket.timeout:
                 self.start_app()
                 if self.__reboot_status == ErrorCodes.REBOOTING:
@@ -127,18 +121,19 @@ class Machine(threading.Thread):
         try:
             tn = telnetlib.Telnet(self.__ip, timeout=30)
             tn.read_until(b'ogin: ', timeout=30)
-            tn.write(self.__username.encode('ascii') + b'\n')
+            tn.write(self.__dut_username.encode('ascii') + b'\n')
             l = tn.read_very_eager()
-            if self.__dut_passwd != "":
+            if self.__dut_password != "":
                 tn.read_until(b'assword: ', timeout=30)
-                tn.write( self.__dut_passwd.encode('ascii') + b'\n')
+                tn.write(self.__dut_password.encode('ascii') + b'\n')
             tn.read_until(b'$ ', timeout=30)
 
             cmd_line_pkill = 'pkill ' + self.__exec_code + '\r\n'
             tn.write(cmd_line_pkill.encode('ascii'))
             l = tn.read_very_eager()
 
-            cmd_line_run = 'nohup ' + self.__dut_app_path + self.__exec_code + ' ' + self.get_self_ip_address() + ' ' + str( self.__receiving_port) + ' ' + \
+            cmd_line_run = 'nohup ' + self.__dut_app_path + self.__exec_code + ' ' + self.get_self_ip_address() + ' ' + str(
+                self.__receiving_port) + ' ' + \
                            self.__app_args + ' &\r\n'
 
             tn.write(cmd_line_run.encode('ascii'))
@@ -168,7 +163,6 @@ class Machine(threading.Thread):
         The message is organized in the following way
         | 1 byte MessageType | 1023 message content |
         - MessageType is a number 0 to 255, the following types are defined
-            CREATE_HEADER = 0
             ITERATION_TIME = 1
             ERROR_DETAIL = 2
             INFO_DETAIL = 3
@@ -181,13 +175,7 @@ class Machine(threading.Thread):
         """
         message_type = MessageType(int(message[0]))
         message_content = message[1:]
-        if message_type == MessageType.CREATE_HEADER:
-            self.__dut_log_obj = DUTLogging(log_dir=self.__dut_log_path,
-                                            test_name="None", test_header=message_content,
-                                            hostname=self.__hostname, ecc_config="OFF")
-            raise NotImplementedError
-
-        elif message_type == MessageType.ITERATION_TIME:
+        if message_type == MessageType.ITERATION_TIME:
             raise NotImplementedError
         elif message_type == MessageType.ERROR_DETAIL:
             raise NotImplementedError
@@ -213,27 +201,29 @@ class Machine(threading.Thread):
                 reboot_msg = f"Rebooted IP:{self.__ip}"
             else:
                 reboot_msg = f"Reboot failed for IP:{self.__ip}"
-            reboot_msg += f" HOSTNAME:{self.__hostname} STATUS:{self.__reboot_status}"
+            reboot_msg += f" HOSTNAME:{self.__dut_hostname} STATUS:{self.__reboot_status}"
             reboot_msg += f" PORT_NUMBER: {self.__switch_port} SWITCH_IP: {self.__switch_ip}"
             self.__logger.info(reboot_msg)
         elif kind == ErrorCodes.WAITING_BOOT_PROBLEM:
             reboot_msg = f"Waiting {self.__boot_problem_max_delta}s due boot problem IP:{self.__ip} "
-            reboot_msg += f"HOSTNAME:{self.__hostname}"
+            reboot_msg += f"HOSTNAME:{self.__dut_hostname}"
             self.__logger.info(reboot_msg)
         elif kind == ErrorCodes.WAITING_FOR_POSSIBLE_BOOT:
             self.__logger.debug(
-                f"Waiting for a possible boot in the future from IP:{self.__ip} HOSTNAME:{self.__hostname}")
+                f"Waiting for a possible boot in the future from IP:{self.__ip} HOSTNAME:{self.__dut_hostname}")
         elif kind == ErrorCodes.BOOT_PROBLEM:
-            reboot_msg = f"Boot Problem IP:{self.__ip} HOSTNAME:{self.__hostname}. "
+            reboot_msg = f"Boot Problem IP:{self.__ip} HOSTNAME:{self.__dut_hostname}. "
             reboot_msg += f"The thread will wait for a connection for {self.__boot_problem_max_delta}s"
             self.__logger.error(reboot_msg)
         elif kind == ErrorCodes.MAX_SEQ_REBOOT_REACHED:
             self.__logger.error(
-                f"Maximum number of reboots allowed reached for IP:{self.__ip} HOSTNAME:{self.__hostname}")
+                f"Maximum number of reboots allowed reached for IP:{self.__ip} HOSTNAME:{self.__dut_hostname}")
         elif kind == ErrorCodes.TURN_ON:
-            self.__logger.info(f"Turning ON IP:{self.__ip} HOSTNAME:{self.__hostname} STATUS:{self.__reboot_status}")
+            self.__logger.info(
+                f"Turning ON IP:{self.__ip} HOSTNAME:{self.__dut_hostname} STATUS:{self.__reboot_status}")
         elif kind == ErrorCodes.APP_CRASH:
             reboot_msg = f"App Restarted IP:{self.__ip}"
+
     def __reboot_this_machine(self) -> float:
         """ reboot the device based on reboot_machine module
         :return reboot_status
@@ -277,7 +267,7 @@ if __name__ == '__main__':
         logger_name="MACHINE_LOG",
         boot_problem_max_delta=10,
         power_cycle_sleep_time=2,
-        dut_log_path="/tmp",
+        server_log_path="/tmp",
         sdc_data_size=5,
         max_timeout_time=10,
         username="carol",
@@ -296,3 +286,32 @@ if __name__ == '__main__':
     machine.join()
 
     print("RAGE AGAINST THE MACHINE")
+
+# OLD Class declaration
+#     def __init__(self,
+#                  ip: str, receiving_port: int, diff_reboot: float, hostname: str, power_switch_ip: str,
+#                  power_switch_port: int,
+#                  power_switch_model: str, logger_name: str, boot_problem_max_delta: float,
+#                  power_cycle_sleep_time: float, server_log_path: str,
+#                  sdc_data_size: int, max_timeout_time: int, username: str, dut_passwd: str, dut_app_path: str,
+#                  exec_code: str,
+#                  app_args: str, *args, **kwargs):
+#         :param ip: Machine' IP
+#         :param receiving_port: port fro receiving messages from the DUT
+#         :param diff_reboot: Difference threshold to wait between the connections of the device
+#         :param hostname: Hostname of the device
+#         :param power_switch_ip: IP address of the power switch that the device is connected
+#         :param power_switch_port: Power switch port that the device is connected
+#         :param power_switch_model: Model (type/brand) of the power switch
+#         :param logger_name: Main logger name to store the logging information
+#         :param boot_problem_max_delta: Delta time necessary to take some action after boot problem
+#         :param power_cycle_sleep_time: difference between OFF and ON when rebooting
+#         :param server_log_path: directory to store the logs for the test
+#         :paran sdc_data_size: size of the SDC message
+#         :param max_timeout_time: maximum waiting time for messages
+#         :param username: DUT username
+#         :param dut_passwd: DUT password
+#         :param dut_app_path: path where is the application and input files
+#         :param exec_code: name the application running
+#         :param app_args: arguments for the application running
+#         # TODO: CHeck if the approach will use this way of setting the parameters
