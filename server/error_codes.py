@@ -19,6 +19,7 @@ class ErrorCodes(Enum):
     HTTP_ERROR = 8
     CONNECTION_ERROR = 9
     TIMEOUT_ERROR = 10
+    APP_CRASH = 11
 
     def __str__(self) -> str:
         """Override the str method

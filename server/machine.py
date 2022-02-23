@@ -95,19 +95,19 @@ class Machine(threading.Thread):
             try:
                 data, addr = self.__messages_socket.recvfrom(self.__sdc_data_size)
             except socket.timeout:
-                start_app_ret = self.start_app()
-                if start_app_ret == ErrorCodes.REBOOTING:
-                    # TODO log as syscrash
+                self.start_app()
+                if self.__reboot_status == ErrorCodes.REBOOTING:
                     self.__reboot_this_machine()
+                    self.__log(ErrorCodes.REBOOTING)
                 else:
                     num_tries = 0
-                    while start_app_ret != ErrorCodes.SUCCESS and num_tries < 4:
-                        start_app_ret = self.start_app()
+                    while self.__reboot_status != ErrorCodes.SUCCESS and num_tries < 4:
+                        self.start_app()
                         num_tries += 1
-                    if start_app_ret != ErrorCodes.SUCCESS:
+                    if self.__reboot_status != ErrorCodes.SUCCESS:
                         self.__reboot_this_machine()
-                        # TODO log as syscrash
-                    # TODO log as appcrash
+                        self.__log(ErrorCodes.REBOOTING)
+                    self.__log(ErrorCodes.APP_CRASH)
             else:
 
                 self.__process_message(data)
@@ -148,11 +148,11 @@ class Machine(threading.Thread):
 
         except OSError as e:
             if e.errno == errno.EHOSTUNREACH:
-                return ErrorCodes.REBOOTING
-            return ErrorCodes.WAITING_FOR_POSSIBLE_BOOT
+                self.__reboot_status = ErrorCodes.REBOOTING
+            self.__reboot_status = ErrorCodes.WAITING_FOR_POSSIBLE_BOOT
         except EOFError as e:
-            return ErrorCodes.WAITING_FOR_POSSIBLE_BOOT
-        return ErrorCodes.SUCCESS
+            self.__reboot_status = ErrorCodes.WAITING_FOR_POSSIBLE_BOOT
+        self.__reboot_status = ErrorCodes.SUCCESS
 
     def join(self, *args, **kwargs) -> None:
         """ Stop the main function before join the thread
@@ -232,7 +232,8 @@ class Machine(threading.Thread):
                 f"Maximum number of reboots allowed reached for IP:{self.__ip} HOSTNAME:{self.__hostname}")
         elif kind == ErrorCodes.TURN_ON:
             self.__logger.info(f"Turning ON IP:{self.__ip} HOSTNAME:{self.__hostname} STATUS:{self.__reboot_status}")
-
+        elif kind == ErrorCodes.APP_CRASH:
+            reboot_msg = f"App Restarted IP:{self.__ip}"
     def __reboot_this_machine(self) -> float:
         """ reboot the device based on reboot_machine module
         :return reboot_status
