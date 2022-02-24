@@ -29,7 +29,7 @@ class CommandFactory:
         """ Fill or re-fill the command queue
         :return:
         """
-        if self.__cmd_queue is False:
+        if not self.__cmd_queue:
             self.__logger.debug("Re-filling the queue of commands")
             self.__cmd_queue = collections.deque(self.__json_data_list)
 
