@@ -1,11 +1,10 @@
 import collections
 import json
 import logging
+import typing
 
 # Command window execution in seconds
 # TODO: Check with Pablo and Daniel if this is static
-import typing
-
 __COMMAND_WINDOW = 3600
 
 
