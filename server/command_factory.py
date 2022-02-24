@@ -12,7 +12,7 @@ __COMMAND_WINDOW = 3600
 class CommandFactory:
     def __init__(self, json_files_list: list, logger_name: str):
         self.__json_data_list = list()
-        self.__logger = logging.getLogger(logger_name)
+        self.__logger = logging.getLogger(f"{logger_name}.{__name__}")
         for json_file in json_files_list:
             try:
                 with open(json_file) as fp:

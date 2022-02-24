@@ -37,6 +37,10 @@ class Machine(threading.Thread):
         :param *args: args that will be passed to threading.Thread
         :param *kwargs: kwargs that will be passed to threading.Thread
         """
+        self.__logger_name = f"{logger_name}.{__name__}"
+        self.__logger = logging.getLogger(self.__logger_name)
+        self.__logger.info("Creating a new Machine thread")
+
         # load yaml file
         with open(configuration_file, 'r') as fp:
             machine_parameters = yaml.load(fp, Loader=yaml.SafeLoader)
@@ -57,8 +61,6 @@ class Machine(threading.Thread):
         self.__command_factory = CommandFactory(json_files_list=machine_parameters["json_files"],
                                                 logger_name=logger_name)
 
-        self.__logger_name = logger_name
-        self.__logger = logging.getLogger(self.__logger_name)
         self.__stop_event = threading.Event()
         self.__reboot_status = ErrorCodes.SUCCESS
         self.__dut_log_path = f"{server_log_path}/{self.__dut_hostname}"

@@ -5,13 +5,13 @@ public function is reboot_machine, which will reboot based on the
 parameters.
 """
 
-import os
-import time
-import requests
 import json
 import logging
-
+import os
+import time
 import typing
+
+import requests
 
 from error_codes import ErrorCodes
 
@@ -136,7 +136,7 @@ def reboot_machine(address: str, switch_model: str, switch_port: int, switch_ip:
     :param logger_name: logger name defined in the main setup module
     :return: a tuple containing the outcomes of the OFF and ON commands
     """
-    logger = logging.getLogger(logger_name)
+    logger = logging.getLogger(f"{logger_name}.{__name__}")
     logger.info(f"Rebooting machine: {address}, switch IP: {switch_ip}, switch switch_port: {switch_port}")
     off_status = _select_command_on_switch(status=__OFF, switch_model=switch_model, switch_port=switch_port,
                                            switch_ip=switch_ip, logger=logger)
@@ -155,7 +155,7 @@ def turn_machine_on(address: str, switch_model: str, switch_port: int, switch_ip
     :param logger_name: logger name defined in the main setup module
     :return: ErrorCodes status
     """
-    logger = logging.getLogger(logger_name)
+    logger = logging.getLogger(f"{logger_name}.{__name__}")
     logger.info(f"Turning ON machine: {address}, switch IP: {switch_ip}, switch switch_port: {switch_port}")
     return _select_command_on_switch(status=__ON, switch_model=switch_model, switch_port=switch_port,
                                      switch_ip=switch_ip, logger=logger)

@@ -50,7 +50,7 @@ def main():
     server_ip = server_parameters['server_ip']
 
     # log format
-    logger_name = os.path.basename(str(__file__).upper().replace(".PY", ""))
+    logger_name = os.path.basename(str(__file__).lower().replace(".py", ""))
     logger = logging_setup(logger_name=logger_name, log_file=server_log_file)
 
     # If path does not exist create it
