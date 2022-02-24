@@ -34,7 +34,7 @@ class CommandFactory:
             self.__logger.debug("Re-filling the queue of commands")
             self.__cmd_queue = collections.deque(self.__json_data_list)
 
-    def get_cmds_exec_and_kill(self, encode: str = 'ascii') -> typing.Tuple[str, str]:
+    def get_cmds_and_test_info(self, encode: str = 'ascii') -> typing.Tuple[str, str, str, str]:
         """ Based on the Factory pattern we can build the string taking into consideration how much a cmd already
         executed. For example, if we have 10 configurations on the __json_data_list, then the get_cmd will
         select the one that is currently executing and did not complete __COMMAND_WINDOW time.
@@ -45,8 +45,10 @@ class CommandFactory:
         # The following code is not correct
         machine_dict = self.__cmd_queue.pop()
         self.__fill_the_queue()
-        cmd_exec, cmd_kill = machine_dict["exec"], machine_dict["killcmd"]
-        return cmd_exec.encode(encoding=encode), cmd_kill.encode(encoding=encode)
+        cmd_exec = machine_dict["exec"].encode(encoding=encode)
+        cmd_kill = machine_dict["killcmd"].encode(encoding=encode)
+        code_name, code_header = "", ""
+        return cmd_exec, cmd_kill, code_name, code_header
 
 
 if __name__ == '__main__':

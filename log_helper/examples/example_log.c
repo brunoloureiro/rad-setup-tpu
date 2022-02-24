@@ -16,10 +16,6 @@ int main() {
     // set the interval of iteration to print details of current test,
     // default is 1
     set_iter_interval_print(5);
-    char file_name[1024];
-    get_log_file_name(file_name);
-    printf("log file is %s\n", file_name);
-
     int i;
     for (i = 0; i < 40; i++) {
 

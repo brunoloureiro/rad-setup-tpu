@@ -13,9 +13,10 @@
 #include <fstream>
 #include <vector>
 #include <iterator>
+#include <sstream>
 
 namespace log_helper {
-    std::string _exception_info(const std::string& message, const std::string& file, int line) {
+    std::string _exception_info(const std::string &message, const std::string &file, int line) {
         return message + " - FILE:" + file + ":" + std::to_string(line);
     }
 
@@ -41,9 +42,14 @@ namespace log_helper {
             this->log_info_detail_counter = 0;
 
             if (this->iteration_number % this->iter_interval_print == 0) {
-                this->end_iteration_string = "#IT Ite:" + std::to_string(this->iteration_number) +
-                                             " KerTime:" + std::to_string(this->kernel_time) +
-                                             " AccTime:" + std::to_string(this->kernel_time_acc);
+                std::ostringstream output;
+                // Decimal places for the precision, 7 places
+                output.precision(7);
+                output << "#IT " << this->iteration_number
+                       << std::scientific
+                       << " KerTime:" << this->kernel_time
+                       << " AccTime:" << this->kernel_time_acc;
+                this->end_iteration_string = output.str();
             } else {
                 //does not write if it's empty
                 this->end_iteration_string = "";
@@ -51,36 +57,91 @@ namespace log_helper {
             this->iteration_number++;
         }
 
-        virtual void log_error_count(size_t kernel_errors) = 0;
+        virtual void log_error_count(size_t kernel_errors) {
+            this->log_error_count_str = "";
+            if (kernel_errors > 0) {
+                //"#SDC Ite:%lu KerTime:%f AccTime:%f KerErr:%lu AccErr:%lu\n",
+                std::ostringstream output;
+                // Decimal places for the precision, 7 places
+                output.precision(7);
 
-        virtual void log_info_count(size_t info_count) = 0;
+                output << "#SDC Ite:" << this->iteration_number
+                       << std::scientific
+                       << " KerTime:" << this->kernel_time
+                       << " AccTime:" << this->kernel_time_acc
+                       << " KerErr:" << kernel_errors;
 
-        virtual void log_error_detail(const std::string &string) = 0;
+                // "#ABORT amount of errors equals of the last iteration\n");
+                if (kernel_errors == this->last_iter_errors &&
+                    (this->last_iter_with_errors + 1) == this->iteration_number && this->double_error_kill) {
+                    output << "\n#ABORT amount of errors equals of the last iteration";
+                } else {
+                    // "#ABORT too many errors per iteration\n");
+                    if (kernel_errors > this->max_errors_per_iter) {
+                        output << "\n#ABORT too many errors per iteration";
+                    }
+                }
+                this->log_error_count_str = output.str();
+                this->last_iter_errors = kernel_errors;
+                this->last_iter_with_errors = this->iteration_number;
+            }
+        }
 
-        virtual void log_info_detail(const std::string &string) = 0;
+        virtual void log_info_count(size_t info_count) {
+            this->log_info_count_str = "";
+            //There is no limit to info that aborts the code
+            //"#CINF Ite:%lu KerTime:%f AccTime:%f KerInfo:%lu AccInfo:%lu\n",
+            if (info_count > 0) {
+                //"#SDC Ite:%lu KerTime:%f AccTime:%f KerErr:%lu AccErr:%lu\n",
+                std::ostringstream output;
+                // Decimal places for the precision, 7 places
+                output.precision(7);
+
+                output << "#INF Ite:" << this->iteration_number
+                       << std::scientific
+                       << " KerTime:" << this->kernel_time
+                       << " AccTime:" << this->kernel_time_acc
+                       << " KerInf:" << info_count;
+                this->log_info_count_str = output.str();
+            }
+        }
+
+        virtual void log_error_detail(std::string &error_detail) {
+            this->log_error_detail_str = "";
+            if (this->log_error_detail_counter <= this->max_errors_per_iter) {
+                this->log_error_detail_str = "#ERR " + error_detail;
+            }
+            this->log_error_detail_counter++;
+        }
+
+        virtual void log_info_detail(std::string &info_detail) {
+            this->log_info_detail_str = "";
+            if (this->log_info_detail_counter <= this->max_infos_per_iter) {
+                this->log_info_detail_str = "#INF " + info_detail;
+            }
+            this->log_info_detail_counter++;
+        }
 
         void set_max_errors_iter(size_t max_errors) {
-            this->max_errors_per_iter = max_errors;
+            if (max_errors >= 1) {
+                this->max_errors_per_iter = max_errors;
+            }
         }
 
         void set_max_infos_iter(size_t max_infos) {
-            this->max_infos_per_iter = max_infos;
+            if (max_infos >= 1) {
+                this->max_infos_per_iter = max_infos;
+            }
         }
 
         void set_iter_interval_print(size_t interval) {
-            if (interval < 1) {
-                this->iter_interval_print = 1;
-            } else {
+            if (interval >= 1) {
                 this->iter_interval_print = interval;
             }
         }
 
         void disable_double_error_kill() {
             this->double_error_kill = false;
-        }
-
-        std::string get_log_file_name() {
-            return this->log_file_name;
         }
 
         virtual ~log_helper_base() = default;
@@ -91,8 +152,7 @@ namespace log_helper {
          * @param benchmark_name
          * @param test_info
          */
-        log_helper_base(std::string benchmark_name, std::string test_info)
-                : benchmark_name(std::move(benchmark_name)), header(std::move(test_info)) {
+        log_helper_base() {
             // Necessary for all configurations (network or local)
             this->read_configuration_file();
         }
@@ -159,9 +219,6 @@ namespace log_helper {
         const std::string config_file_path = "/etc/radiation-benchmarks.conf";
         config_map configuration_parameters;
 
-        std::string log_file_name;
-        std::string header;
-        std::string benchmark_name;
         std::string end_iteration_string;
 
         // Max errors that can be found for a single iteration
@@ -170,14 +227,13 @@ namespace log_helper {
         size_t max_infos_per_iter = 500;
 
         // Used to print the log only for some iterations, equal 1 means print every iteration
-        size_t iter_interval_print = 1;
+        size_t iter_interval_print = 10;
 
         // Saves the last amount of error found for a specific iteration
         size_t last_iter_errors = 0;
         // Saves the last iteration index that had an error
         size_t last_iter_with_errors = 0;
 
-        size_t kernels_total_errors = 0;
         size_t iteration_number = 0;
         double kernel_time_acc = 0;
         double kernel_time = 0;
@@ -187,6 +243,12 @@ namespace log_helper {
         size_t log_error_detail_counter = 0;
         size_t log_info_detail_counter = 0;
         bool double_error_kill = true;
+
+        std::string log_error_detail_str;
+        std::string log_info_detail_str;
+        std::string log_error_count_str;
+        std::string end_log_str;
+        std::string log_info_count_str;
     };
 
 

@@ -44,12 +44,6 @@ void set_iter_interval_print(size_t interval);
 void disable_double_error_kill();
 
 /**
- * Return the name of the log file generated
- * @param log_file_name
- */
-void get_log_file_name(char *log_file_name);
-
-/**
  * Generate the log file name, log info from user about the test
  * to be executed and reset log variables
  * @param benchmark_name

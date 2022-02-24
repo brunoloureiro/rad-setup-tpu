@@ -35,18 +35,6 @@ void disable_double_error_kill() {
     }
 }
 
-void get_log_file_name(char *log_file_name) {
-    //check if it is empty
-    if (log_helper_ptr) {
-        auto log_file_name_str = log_helper_ptr->get_log_file_name();
-        if (std::strlen(log_file_name) < log_file_name_str.size()) {
-            std::cerr << log_helper::EXCEPTION_LINE("String passed as parameter has smaller size than the logfilename ")
-                      << std::endl;
-        }
-        std::copy(log_file_name_str.begin(), log_file_name_str.end(), log_file_name);
-    }
-}
-
 void start_log_file(const char *benchmark_name, const char *test_info) {
     //TODO: do for local log file
     log_helper_ptr = std::make_unique<log_helper::log_helper_udp>(benchmark_name, test_info);

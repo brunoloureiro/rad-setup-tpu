@@ -1,7 +1,6 @@
 """
 Module to log the info received from the devices
 """
-import enum
 import os
 
 from datetime import datetime
@@ -13,23 +12,6 @@ END_STATUS = dict(
     APPLICATION_CRASH="#DUE: system crash",
     POWER_CYCLE="#DUE: power cycle",
 )
-
-
-class MessageType(enum.IntEnum):
-    """ Message types defined for the communication """
-    ITERATION_TIME = 1
-    ERROR_DETAIL = 2
-    INFO_DETAIL = 3
-    SDC_END = 4
-    TOO_MANY_ERRORS_PER_ITERATION = 5
-    TOO_MANY_INFOS_PER_ITERATION = 6
-    NORMAL_END = 7
-    SAME_ERROR_LAST_ITERATION = 8
-
-    # Method to perform to string
-    def __str__(self) -> str: return str(self.name)
-    # Representation is the same as to string
-    def __repr__(self) -> str: return str(self)
 
 
 class DUTLogging:
@@ -77,15 +59,6 @@ class DUTLogging:
         """
         self.__test_ending_status = ending_status
 
-    def log_test_iteration(self, iteration_detail: str):
-        # TODO: This method must log one iteration of the test
-        #       Must contains the execution time of the kernel, error count, SDC count
-        raise NotImplementedError
-
-    def log_error_detail(self, error_detail: str):
-        # TODO: This method must log the error_detail received from a device
-        raise NotImplementedError
-
-    def log_int_detail(self, info_detail: str):
-        # TODO: This method must log the info_detail received from a device
+    def log_message(self, message: str):
+        # TODO: This must log a message that come from LogHelper
         raise NotImplementedError

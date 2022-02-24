@@ -9,9 +9,9 @@ import time
 import yaml
 
 from command_factory import CommandFactory
-from dut_logging import MessageType
 from error_codes import ErrorCodes
 from reboot_machine import reboot_machine, turn_machine_on
+from dut_logging import DUTLogging
 
 
 class Machine(threading.Thread):
@@ -113,8 +113,7 @@ class Machine(threading.Thread):
                         self.__log(ErrorCodes.REBOOTING)
                     self.__log(ErrorCodes.APP_CRASH)
             else:
-
-                self.__process_message(data)
+                self.__dut_log_obj.log_message(message=data)
 
     def __start_app(self):
         """ Start the app on the DUT
@@ -125,7 +124,7 @@ class Machine(threading.Thread):
             tn = telnetlib.Telnet(self.__ip, timeout=30)
             tn.read_until(b'ogin: ', timeout=30)
             tn.write(self.__dut_username.encode('ascii') + b'\n')
-            l = tn.read_very_eager()
+            tn.read_very_eager()
             if self.__dut_password != "":
                 tn.read_until(b'assword: ', timeout=30)
                 tn.write(self.__dut_password.encode('ascii') + b'\n')
@@ -133,7 +132,11 @@ class Machine(threading.Thread):
 
             # This process is being redesigned to become a Factory
             # The commands are already encoded
-            cmd_line_run, cmd_line_pkill = self.__command_factory.get_cmds_exec_and_kill()
+            cmd_line_run, cmd_line_pkill, test_name, header = self.__command_factory.get_cmds_and_test_info()
+            del self.__dut_log_obj
+            # TODO: Generalize the ECC getting
+            self.__dut_log_obj = DUTLogging(log_dir=self.__dut_log_path, test_name=test_name, test_header=header,
+                                            hostname=self.__dut_hostname, ecc_config="OFF")
             tn.write(cmd_line_pkill)
             tn.read_very_eager()
             tn.write(cmd_line_run)
@@ -156,41 +159,6 @@ class Machine(threading.Thread):
         """
         self.__stop_event.set()
         super(Machine, self).join(*args, **kwargs)
-
-    def __process_message(self, message) -> None:
-        """ Process the last message in the queue
-        All messages have 1024B
-        The message is organized in the following way
-        | 1 byte MessageType | 1023 message content |
-        - MessageType is a number 0 to 255, the following types are defined
-            ITERATION_TIME = 1
-            ERROR_DETAIL = 2
-            INFO_DETAIL = 3
-            SDC_END = 4
-            TOO_MANY_ERRORS_PER_ITERATION = 5
-            TOO_MANY_INFOS_PER_ITERATION = 6
-            NORMAL_END = 7
-            SAME_ERROR_LAST_ITERATION = 8
-        :return:
-        """
-        message_type = MessageType(int(message[0]))
-        message_content = message[1:]
-        if message_type == MessageType.ITERATION_TIME:
-            raise NotImplementedError
-        elif message_type == MessageType.ERROR_DETAIL:
-            raise NotImplementedError
-        elif message_type == MessageType.INFO_DETAIL:
-            raise NotImplementedError
-        elif message_type == MessageType.SDC_END:
-            raise NotImplementedError
-        elif message_type == MessageType.TOO_MANY_ERRORS_PER_ITERATION:
-            raise NotImplementedError
-        elif message_type == MessageType.TOO_MANY_INFOS_PER_ITERATION:
-            raise NotImplementedError
-        elif message_type == MessageType.NORMAL_END:
-            raise NotImplementedError
-        elif message_type == MessageType.SAME_ERROR_LAST_ITERATION:
-            raise NotImplementedError
 
     def __log(self, kind: ErrorCodes) -> None:
         """ Log some Machine behavior
@@ -325,3 +293,38 @@ if __name__ == '__main__':
 #             return None
 #
 #         return ip_socket.getsockname()[0]
+#
+#     def __process_message(self, message) -> None:
+# """ Process the last message in the queue
+# All messages have 1024B
+# The message is organized in the following way
+# | 1 byte MessageType | 1023 message content |
+# - MessageType is a number 0 to 255, the following types are defined
+#     ITERATION_TIME = 1
+#     ERROR_DETAIL = 2
+#     INFO_DETAIL = 3
+#     SDC_END = 4
+#     TOO_MANY_ERRORS_PER_ITERATION = 5
+#     TOO_MANY_INFOS_PER_ITERATION = 6
+#     NORMAL_END = 7
+#     SAME_ERROR_LAST_ITERATION = 8
+# :return:
+# """
+# message_type = MessageType(int(message[0]))
+# message_content = message[1:]
+# if message_type == MessageType.ITERATION_TIME:
+#     raise NotImplementedError
+# elif message_type == MessageType.ERROR_DETAIL:
+#     raise NotImplementedError
+# elif message_type == MessageType.INFO_DETAIL:
+#     raise NotImplementedError
+# elif message_type == MessageType.SDC_END:
+#     raise NotImplementedError
+# elif message_type == MessageType.TOO_MANY_ERRORS_PER_ITERATION:
+#     raise NotImplementedError
+# elif message_type == MessageType.TOO_MANY_INFOS_PER_ITERATION:
+#     raise NotImplementedError
+# elif message_type == MessageType.NORMAL_END:
+#     raise NotImplementedError
+# elif message_type == MessageType.SAME_ERROR_LAST_ITERATION:
+#     raise NotImplementedError
