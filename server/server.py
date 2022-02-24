@@ -2,6 +2,7 @@
 import argparse
 import logging
 import os
+
 import yaml
 
 from logger_formatter import ColoredLogger
@@ -46,9 +47,10 @@ def main():
 
     server_log_file = server_parameters['server_log_file']
     server_log_store_dir = server_parameters['server_log_store_dir']
+    server_ip = server_parameters['server_ip']
 
     # log format
-    logger_name = __name__
+    logger_name = os.path.basename(str(__file__).upper().replace(".PY", ""))
     logger = logging_setup(logger_name=logger_name, log_file=server_log_file)
 
     # If path does not exist create it
@@ -63,12 +65,10 @@ def main():
         # Start the server threads
         for m in server_parameters["machines"]:
             if m['enabled']:
-                machine = Machine(
-                    configuration_file=m["cfg_file"], receiving_port=m["rcv_port"], logger_name=logger_name,
-                    server_log_path=server_log_store_dir
-                )
+                machine = Machine(configuration_file=m["cfg_file"], server_ip=server_ip, logger_name=logger_name,
+                                  server_log_path=server_log_store_dir)
 
-                logger.info(f"Starting a new thread to listen at {m['rcv_port']}")
+                logger.info(f"Starting a new thread to listen at {machine}")
                 machine.start()
 
     except KeyboardInterrupt:

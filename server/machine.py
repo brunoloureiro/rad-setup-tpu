@@ -8,7 +8,8 @@ import time
 
 import yaml
 
-from dut_logging import DUTLogging, MessageType
+from command_factory import CommandFactory
+from dut_logging import MessageType
 from error_codes import ErrorCodes
 from reboot_machine import reboot_machine, turn_machine_on
 
@@ -24,13 +25,13 @@ class Machine(threading.Thread):
     __REBOOT_AGAIN_INTERVAL_AFTER_BOOT_PROBLEM = 3600
 
     # Data receive size in bytes
-    __SDC_DATA_SIZE = 1024
+    __DATA_SIZE = 1024
 
-    def __init__(self, configuration_file: str, receiving_port: int, logger_name: str, server_log_path: str, *args,
+    def __init__(self, configuration_file: str, server_ip: str, logger_name: str, server_log_path: str, *args,
                  **kwargs):
         """ Initialize a new thread that represents a setup machine
-        :param configuration_file: YAML file that contains all information from
-        :param receiving_port: port fro receiving messages from the DUT
+        :param configuration_file: YAML file that contains all information from that specific Device Under Test (DUT)
+        :param server_ip: IP of the server
         :param logger_name: Main logger name to store the logging information
         :param server_log_path: directory to store the logs for the test
         :param *args: args that will be passed to threading.Thread
@@ -49,7 +50,12 @@ class Machine(threading.Thread):
         self.__max_timeout_time = machine_parameters["max_timeout_time"]
         self.__dut_hostname = machine_parameters["hostname"]
         self.__dut_username = machine_parameters["username"]
-        self.__dut_password = machine_parameters["dut_passwd"]
+        self.__dut_password = machine_parameters["password"]
+        self.__receiving_port = machine_parameters["receive_port"]
+
+        # Factory to manage the command execution
+        self.__command_factory = CommandFactory(json_files_list=machine_parameters["json_files"],
+                                                logger_name=logger_name)
 
         self.__logger_name = logger_name
         self.__logger = logging.getLogger(self.__logger_name)
@@ -60,17 +66,19 @@ class Machine(threading.Thread):
         if os.path.isdir(self.__dut_log_path) is False:
             os.mkdir(self.__dut_log_path)
 
-        self.__receiving_port = receiving_port
         self.__timestamp = time.time()
 
         self.__dut_log_obj = None
         # Configure the socket
         self.__messages_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.__messages_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.__messages_socket.bind((self.get_self_ip_address(), self.__receiving_port))
+        self.__messages_socket.bind((server_ip, self.__receiving_port))
         self.__messages_socket.settimeout(self.__max_timeout_time)
 
         super(Machine, self).__init__(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"IP:{self.__ip} HOSTNAME:{self.__dut_hostname} PORT:{self.__receiving_port}"
 
     def run(self):
         """ Run execution of thread
@@ -87,16 +95,16 @@ class Machine(threading.Thread):
         #           - At the destruction of the class or stop of the server the Machine MUST close all log files
         while self.__stop_event.is_set():
             try:
-                data, addr = self.__messages_socket.recvfrom(self.__SDC_DATA_SIZE)
+                data, address = self.__messages_socket.recvfrom(self.__DATA_SIZE)
             except socket.timeout:
-                self.start_app()
+                self.__start_app()
                 if self.__reboot_status == ErrorCodes.REBOOTING:
                     self.__reboot_this_machine()
                     self.__log(ErrorCodes.REBOOTING)
                 else:
                     num_tries = 0
                     while self.__reboot_status != ErrorCodes.SUCCESS and num_tries < 4:
-                        self.start_app()
+                        self.__start_app()
                         num_tries += 1
                     if self.__reboot_status != ErrorCodes.SUCCESS:
                         self.__reboot_this_machine()
@@ -106,17 +114,10 @@ class Machine(threading.Thread):
 
                 self.__process_message(data)
 
-    def get_self_ip_address(self):
-
-        ip_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        try:
-            ip_socket.connect((self.__ip, 1027))
-        except socket.error:
-            return None
-
-        return ip_socket.getsockname()[0]
-
-    def start_app(self):
+    def __start_app(self):
+        """ Start the app on the DUT
+        :return:
+        """
 
         try:
             tn = telnetlib.Telnet(self.__ip, timeout=30)
@@ -128,16 +129,13 @@ class Machine(threading.Thread):
                 tn.write(self.__dut_password.encode('ascii') + b'\n')
             tn.read_until(b'$ ', timeout=30)
 
-            cmd_line_pkill = 'pkill ' + self.__exec_code + '\r\n'
-            tn.write(cmd_line_pkill.encode('ascii'))
-            l = tn.read_very_eager()
-
-            cmd_line_run = 'nohup ' + self.__dut_app_path + self.__exec_code + ' ' + self.get_self_ip_address() + ' ' + str(
-                self.__receiving_port) + ' ' + \
-                           self.__app_args + ' &\r\n'
-
-            tn.write(cmd_line_run.encode('ascii'))
-            l = tn.read_very_eager()
+            # This process is being redesigned to become a Factory
+            # The commands are already encoded
+            cmd_line_run, cmd_line_pkill = self.__command_factory.get_cmds_exec_and_kill()
+            tn.write(cmd_line_pkill)
+            tn.read_very_eager()
+            tn.write(cmd_line_run)
+            tn.read_very_eager()
             time.sleep(0.1)
             tn.close()
 
@@ -315,3 +313,13 @@ if __name__ == '__main__':
 #         :param exec_code: name the application running
 #         :param app_args: arguments for the application running
 #         # TODO: CHeck if the approach will use this way of setting the parameters
+
+#     def get_self_ip_address(self):
+#
+#         ip_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+#         try:
+#             ip_socket.connect((self.__ip, 1027))
+#         except socket.error:
+#             return None
+#
+#         return ip_socket.getsockname()[0]
