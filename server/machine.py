@@ -191,6 +191,7 @@ class Machine(threading.Thread):
                 f"Turning ON IP:{self.__ip} HOSTNAME:{self.__dut_hostname} STATUS:{self.__reboot_status}")
         elif kind == ErrorCodes.APP_CRASH:
             reboot_msg = f"App Restarted IP:{self.__ip}"
+            self.__logger.error(reboot_msg)
 
     def __reboot_this_machine(self) -> float:
         """ reboot the device based on reboot_machine module
