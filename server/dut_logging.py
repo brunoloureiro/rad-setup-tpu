@@ -1,17 +1,23 @@
 """
 Module to log the info received from the devices
 """
+import enum
+import logging
 import os
 
 from datetime import datetime
 
-END_STATUS = dict(
-    NORMAL_END="#END",
-    SAME_ERROR_LAST_ITERATION="#ABORT: amount of errors equals of the last iteration",
-    TOO_MANY_ERRORS="#ABORT: too many errors per iteration",
-    APPLICATION_CRASH="#DUE: system crash",
-    POWER_CYCLE="#DUE: power cycle",
-)
+
+class EndStatus(enum.Enum):
+    NORMAL_END = "#END"
+    SAME_ERROR_LAST_ITERATION = "#ABORT: amount of errors equals of the last iteration"
+    TOO_MANY_ERRORS = "#ABORT: too many errors per iteration"
+    APPLICATION_CRASH = "#DUE: system crash"
+    POWER_CYCLE = "#DUE: power cycle"
+
+    def __str__(self): return self.name
+
+    def __repr__(self): return str(self)
 
 
 class DUTLogging:
@@ -41,7 +47,7 @@ class DUTLogging:
             log_file.write(begin_str)
 
         # This var will be set to false in case the machine stops responding and a DUE is logged
-        self.__test_ending_status = END_STATUS["NORMAL_END"]
+        self.__test_ending_status = EndStatus.NORMAL_END
 
     def __del__(self):
         """ Destructor of the class
@@ -52,7 +58,11 @@ class DUTLogging:
                 date_fmt = datetime.today().strftime('%Y-%m-%d-%H-%M-%S')
                 log_file.write(f"({date_fmt}) {self.__test_ending_status}")
 
-    def set_end_status(self, ending_status: str = END_STATUS["NORMAL_END"]) -> None:
+    @property
+    def test_ending_status(self): return self.__test_ending_status
+
+    @test_ending_status.setter
+    def test_ending_status(self, ending_status: EndStatus) -> None:
         """ Set the end to the log file
         :param ending_status: Enum that represents the possible endings
         :return: None
@@ -62,3 +72,27 @@ class DUTLogging:
     def log_message(self, message: str):
         # TODO: This must log a message that come from LogHelper
         raise NotImplementedError
+
+
+if __name__ == '__main__':
+    def debug():
+        # FOR DEBUG ONLY
+        print("CREATING THE MACHINE")
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
+            datefmt='%d-%m-%y %H:%M:%S',
+            filename="unit_test_log_Machine.log",
+            filemode='w'
+        )
+        dut_logging = DUTLogging(
+            log_dir="/tmp/",
+            test_name="DebugTest",
+            test_header="Testing DUT_LOGGING",
+            hostname="carol",
+            ecc_config="OFF"
+        )
+
+        dut_logging.test_ending_status = EndStatus.POWER_CYCLE
+
+    debug()
