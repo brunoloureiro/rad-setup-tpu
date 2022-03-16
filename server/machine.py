@@ -9,9 +9,9 @@ import time
 import yaml
 
 from command_factory import CommandFactory
+from dut_logging import DUTLogging
 from error_codes import ErrorCodes
 from reboot_machine import reboot_machine, turn_machine_on
-from dut_logging import DUTLogging
 
 
 class Machine(threading.Thread):
@@ -26,6 +26,12 @@ class Machine(threading.Thread):
 
     # Data receive size in bytes
     __DATA_SIZE = 1024
+
+    # Num of start app tries
+    __MAX_START_APP_TRIES = 4
+
+    # Max attempts to reboot the device
+    __MAX_ATTEMPTS_TO_REBOOT = 6
 
     def __init__(self, configuration_file: str, server_ip: str, logger_name: str, server_log_path: str, *args,
                  **kwargs):
@@ -62,13 +68,10 @@ class Machine(threading.Thread):
                                                 logger_name=logger_name)
 
         self.__stop_event = threading.Event()
-        self.__reboot_status = ErrorCodes.SUCCESS
         self.__dut_log_path = f"{server_log_path}/{self.__dut_hostname}"
         # make sure that the path exists
         if os.path.isdir(self.__dut_log_path) is False:
             os.mkdir(self.__dut_log_path)
-
-        self.__timestamp = time.time()
 
         self.__dut_log_obj = None
         # Configure the socket
@@ -83,43 +86,54 @@ class Machine(threading.Thread):
         return f"IP:{self.__ip} HOSTNAME:{self.__dut_hostname} PORT:{self.__receiving_port}"
 
     def run(self):
-        """ Run execution of thread
-        """
+        # Run execution of thread
         # lower and upper threshold for reboot interval
         lower_threshold = self.__TIME_MIN_REBOOT_THRESHOLD * self.__diff_reboot
         upper_threshold = self.__TIME_MAX_REBOOT_THRESHOLD * self.__diff_reboot
         # mandatory: It must start the machine on
-        turn_machine_on(address=self.__ip, switch_model=self.__switch_model, switch_port=self.__switch_port,
-                        switch_ip=self.__switch_ip, logger_name=self.__logger_name)
-        # TODO: Refactor this code to manage the new setup
-        #       The following behaviors must be present here:
-        #           - Create a log obj of DUTLogging in the first connection from a device
-        #           - At the destruction of the class or stop of the server the Machine MUST close all log files
+        turn_on_status = turn_machine_on(address=self.__ip, switch_model=self.__switch_model,
+                                         switch_port=self.__switch_port, switch_ip=self.__switch_ip,
+                                         logger_name=self.__logger_name)
+        if turn_on_status != ErrorCodes.SUCCESS:
+            self.__logger.error(f"Failed to turn ON the IP:{self.__ip} HOSTNAME:{self.__dut_hostname}")
+
+        # Control logging timestamps for the machine
+        last_message_timestamp = time.time()
+        # Rebooting timestamp
+        last_reboot_timestamp = time.time()
+        sequentially_reboots = 0
+        # Start the app for the first time
+        try_i = 0
+        while self.__start_app() != ErrorCodes.SUCCESS and try_i <= self.__MAX_START_APP_TRIES:
+            try_i += 1
         while self.__stop_event.is_set():
             try:
                 data, address = self.__messages_socket.recvfrom(self.__DATA_SIZE)
-            except socket.timeout:
-                self.__start_app()
-                if self.__reboot_status == ErrorCodes.REBOOTING:
-                    self.__reboot_this_machine()
-                    self.__log(ErrorCodes.REBOOTING)
-                else:
-                    num_tries = 0
-                    while self.__reboot_status != ErrorCodes.SUCCESS and num_tries < 4:
-                        self.__start_app()
-                        num_tries += 1
-                    if self.__reboot_status != ErrorCodes.SUCCESS:
-                        self.__reboot_this_machine()
-                        self.__log(ErrorCodes.REBOOTING)
-                    self.__log(ErrorCodes.APP_CRASH)
-            else:
                 self.__dut_log_obj.log_message(message=data)
+                last_message_timestamp = time.time()
+            except TimeoutError:
+                if lower_threshold <= last_message_timestamp <= upper_threshold:
+                    pass
+                elif last_message_timestamp > upper_threshold:
+                    # The last connection was too late, reboot the machine
+                    if last_reboot_timestamp > self.__diff_reboot:
+                        last_reboot_timestamp = self.__reboot_this_machine()
+                        sequentially_reboots += 1
+                        if sequentially_reboots > self.__MAX_ATTEMPTS_TO_REBOOT:
+                            # Then we wait for a long time
+                            self.__stop_event.wait(self.__REBOOT_AGAIN_INTERVAL_AFTER_BOOT_PROBLEM)
+                            # fake reboot setting to start trying again
+                            last_reboot_timestamp = time.time()
+
+                    # try __MAX_START_APP_TRIES times to start the app on the DUT
+                    try_i = 0
+                    while self.__start_app() != ErrorCodes.SUCCESS and try_i <= self.__MAX_START_APP_TRIES:
+                        try_i += 1
 
     def __start_app(self):
         """ Start the app on the DUT
         :return:
         """
-
         try:
             tn = telnetlib.Telnet(self.__ip, timeout=30)
             tn.read_until(b'ogin: ', timeout=30)
@@ -132,7 +146,7 @@ class Machine(threading.Thread):
 
             # This process is being redesigned to become a Factory
             # The commands are already encoded
-            cmd_line_run, cmd_line_pkill, test_name, header = self.__command_factory.get_cmds_and_test_info()
+            cmd_line_run, cmd_line_pkill, test_name, header = self.__command_factory.get_commands_and_test_info()
             del self.__dut_log_obj
             # TODO: Generalize the ECC getting
             self.__dut_log_obj = DUTLogging(log_dir=self.__dut_log_path, test_name=test_name, test_header=header,
@@ -144,13 +158,15 @@ class Machine(threading.Thread):
             time.sleep(0.1)
             tn.close()
 
-        except OSError as e:
+        except (OSError, EOFError) as e:
             if e.errno == errno.EHOSTUNREACH:
-                self.__reboot_status = ErrorCodes.REBOOTING
-            self.__reboot_status = ErrorCodes.WAITING_FOR_POSSIBLE_BOOT
-        except EOFError as e:
-            self.__reboot_status = ErrorCodes.WAITING_FOR_POSSIBLE_BOOT
-        self.__reboot_status = ErrorCodes.SUCCESS
+                self.__logger.exception(f"Host unreachable IP:{self.__ip} HOSTNAME:{self.__dut_hostname}")
+                return ErrorCodes.REBOOTING
+            self.__logger.exception(
+                f"Wait for a boot and connection from IP:{self.__ip} HOSTNAME:{self.__dut_hostname}")
+            return ErrorCodes.WAITING_FOR_POSSIBLE_BOOT
+
+        return ErrorCodes.SUCCESS
 
     def join(self, *args, **kwargs) -> None:
         """ Stop the main function before join the thread
@@ -159,39 +175,6 @@ class Machine(threading.Thread):
         """
         self.__stop_event.set()
         super(Machine, self).join(*args, **kwargs)
-
-    def __log(self, kind: ErrorCodes) -> None:
-        """ Log some Machine behavior
-        :param kind: Error code to be logged
-        """
-        if kind == ErrorCodes.REBOOTING:
-            if self.__reboot_status == ErrorCodes.SUCCESS:
-                reboot_msg = f"Rebooted IP:{self.__ip}"
-            else:
-                reboot_msg = f"Reboot failed for IP:{self.__ip}"
-            reboot_msg += f" HOSTNAME:{self.__dut_hostname} STATUS:{self.__reboot_status}"
-            reboot_msg += f" PORT_NUMBER: {self.__switch_port} SWITCH_IP: {self.__switch_ip}"
-            self.__logger.info(reboot_msg)
-        elif kind == ErrorCodes.WAITING_BOOT_PROBLEM:
-            reboot_msg = f"Waiting {self.__boot_problem_max_delta}s due boot problem IP:{self.__ip} "
-            reboot_msg += f"HOSTNAME:{self.__dut_hostname}"
-            self.__logger.info(reboot_msg)
-        elif kind == ErrorCodes.WAITING_FOR_POSSIBLE_BOOT:
-            self.__logger.debug(
-                f"Waiting for a possible boot in the future from IP:{self.__ip} HOSTNAME:{self.__dut_hostname}")
-        elif kind == ErrorCodes.BOOT_PROBLEM:
-            reboot_msg = f"Boot Problem IP:{self.__ip} HOSTNAME:{self.__dut_hostname}. "
-            reboot_msg += f"The thread will wait for a connection for {self.__boot_problem_max_delta}s"
-            self.__logger.error(reboot_msg)
-        elif kind == ErrorCodes.MAX_SEQ_REBOOT_REACHED:
-            self.__logger.error(
-                f"Maximum number of reboots allowed reached for IP:{self.__ip} HOSTNAME:{self.__dut_hostname}")
-        elif kind == ErrorCodes.TURN_ON:
-            self.__logger.info(
-                f"Turning ON IP:{self.__ip} HOSTNAME:{self.__dut_hostname} STATUS:{self.__reboot_status}")
-        elif kind == ErrorCodes.APP_CRASH:
-            reboot_msg = f"App Restarted IP:{self.__ip}"
-            self.__logger.error(reboot_msg)
 
     def __reboot_this_machine(self) -> float:
         """ reboot the device based on reboot_machine module
@@ -205,56 +188,83 @@ class Machine(threading.Thread):
                                                switch_ip=self.__switch_ip,
                                                rebooting_sleep=self.__reboot_sleep_time,
                                                logger_name=self.__logger_name)
-        self.__reboot_status = ErrorCodes.SUCCESS
-        if off_status != ErrorCodes.SUCCESS:
-            self.__reboot_status = off_status
-        if on_status != ErrorCodes.SUCCESS:
-            self.__reboot_status = on_status
+
+        reboot_msg = f"Rebooted"
+        reboot_status = ErrorCodes.SUCCESS
+        if off_status != ErrorCodes.SUCCESS or on_status != ErrorCodes.SUCCESS:
+            reboot_msg = f"Reboot failed for"
+            reboot_status = off_status if off_status != ErrorCodes.SUCCESS else on_status
+        reboot_msg += f" IP:{self.__ip} HOSTNAME:{self.__dut_hostname} STATUS:{reboot_status}"
+        reboot_msg += f" PORT_NUMBER: {self.__switch_port} SWITCH_IP: {self.__switch_ip}"
+        self.__logger.info(reboot_msg)
         return last_reboot_timestamp
 
 
 if __name__ == '__main__':
-    # FOR DEBUG ONLY
-    # from RebootMachine import RebootMachine
+    def debug():
+        # FOR DEBUG ONLY
+        print("CREATING THE MACHINE")
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
+            datefmt='%d-%m-%y %H:%M:%S',
+            filename="unit_test_log_Machine.log",
+            filemode='w'
+        )
+        machine = Machine(
+            configuration_file="machines_cfgs/carolk401.yaml",
+            server_ip="192.168.1.5",
+            logger_name="MACHINE_LOG",
+            server_log_path="/tmp"
+        )
 
-    print("CREATING THE MACHINE")
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
-        datefmt='%d-%m-%y %H:%M:%S',
-        filename="unit_test_log_Machine.log",
-        filemode='w'
-    )
-    machine = Machine(
-        ip="127.0.0.1",
-        receiving_port=10002,
-        diff_reboot=1,
-        hostname="test",
-        power_switch_ip="127.0.0.1",
-        power_switch_port=1,
-        power_switch_model="lindy",
-        logger_name="MACHINE_LOG",
-        boot_problem_max_delta=10,
-        power_cycle_sleep_time=2,
-        server_log_path="/tmp",
-        sdc_data_size=5,
-        max_timeout_time=10,
-        username="carol",
-        dut_passwd="qwerty0",
-        dut_app_path="/home/carol/",
-        exec_code="test",
-        app_args=" 1"
-    )
+        print("EXECUTING THE MACHINE")
+        machine.start()
+        print(f"SLEEPING THE MACHINE FOR {100}s")
+        time.sleep(100)
 
-    print("EXECUTING THE MACHINE")
-    machine.start()
-    print(f"SLEEPING THE MACHINE FOR {100}s")
-    time.sleep(100)
+        print("JOINING THE MACHINE")
+        machine.join()
 
-    print("JOINING THE MACHINE")
-    machine.join()
+        print("RAGE AGAINST THE MACHINE")
 
-    print("RAGE AGAINST THE MACHINE")
+
+    debug()
+
+# OLD __log method
+#     def __log(self, kind: ErrorCodes) -> None:
+#         """ Log some Machine behavior
+#         :param kind: Error code to be logged
+#         """
+#         if kind == ErrorCodes.REBOOTING:
+#             if self.__reboot_status == ErrorCodes.SUCCESS:
+#                 reboot_msg = f"Rebooted IP:{self.__ip}"
+#             else:
+#                 reboot_msg = f"Reboot failed for IP:{self.__ip}"
+#             reboot_msg += f" HOSTNAME:{self.__dut_hostname} STATUS:{self.__reboot_status}"
+#             reboot_msg += f" PORT_NUMBER: {self.__switch_port} SWITCH_IP: {self.__switch_ip}"
+#             self.__logger.info(reboot_msg)
+#         elif kind == ErrorCodes.WAITING_BOOT_PROBLEM:
+#             reboot_msg = f"Waiting {self.__boot_problem_max_delta}s due boot problem IP:{self.__ip} "
+#             reboot_msg += f"HOSTNAME:{self.__dut_hostname}"
+#             self.__logger.info(reboot_msg)
+#         elif kind == ErrorCodes.WAITING_FOR_POSSIBLE_BOOT:
+#             self.__logger.debug(
+#                 f"Waiting for a possible boot in the future from IP:{self.__ip} HOSTNAME:{self.__dut_hostname}")
+#         elif kind == ErrorCodes.BOOT_PROBLEM:
+#             reboot_msg = f"Boot Problem IP:{self.__ip} HOSTNAME:{self.__dut_hostname}. "
+#             reboot_msg += f"The thread will wait for a connection for {self.__boot_problem_max_delta}s"
+#             self.__logger.error(reboot_msg)
+#         elif kind == ErrorCodes.MAX_SEQ_REBOOT_REACHED:
+#             self.__logger.error(
+#                 f"Maximum number of reboots allowed reached for IP:{self.__ip} HOSTNAME:{self.__dut_hostname}")
+#         elif kind == ErrorCodes.TURN_ON:
+#             self.__logger.info(
+#                 f"Turning ON IP:{self.__ip} HOSTNAME:{self.__dut_hostname} STATUS:{self.__reboot_status}")
+#         elif kind == ErrorCodes.APP_CRASH:
+#             reboot_msg = f"App Restarted IP:{self.__ip}"
+#             self.__logger.error(reboot_msg)
+
 
 # OLD Class declaration
 #     def __init__(self,

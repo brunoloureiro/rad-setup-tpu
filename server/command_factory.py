@@ -1,15 +1,15 @@
 import collections
 import json
 import logging
+import time
 import typing
 
-# Command window execution in seconds
-# TODO: Check with Pablo and Daniel if this is static
-__COMMAND_WINDOW = 3600
+_ONE_HOUR_WINDOW = 3600
 
 
 class CommandFactory:
-    def __init__(self, json_files_list: list, logger_name: str):
+    def __init__(self, json_files_list: list, logger_name: str, command_window: int = _ONE_HOUR_WINDOW):
+        self.__command_window = command_window
         self.__json_data_list = list()
         self.__logger = logging.getLogger(f"{logger_name}.{__name__}")
         for json_file in json_files_list:
@@ -22,36 +22,60 @@ class CommandFactory:
                 self.__logger.error(f"Incorrect path for {json_file}, file not found")
 
         # Transform __json_data_list into a FIFO to manage the codes testing
-        self.__cmd_queue = None
+        self.__cmd_queue = collections.deque()
         self.__fill_the_queue()
+        self.__current_command = self.__cmd_queue.pop()
+        self.__current_command["start_timestamp"] = time.time()
 
     def __fill_the_queue(self):
-        """ Fill or re-fill the command queue
-        :return:
-        """
+        """ Fill or re-fill the command queue """
         if not self.__cmd_queue:
             self.__logger.debug("Re-filling the queue of commands")
             self.__cmd_queue = collections.deque(self.__json_data_list)
 
-    def get_cmds_and_test_info(self, encode: str = 'ascii') -> typing.Tuple[str, str, str, str]:
-        """ Based on the Factory pattern we can build the string taking into consideration how much a cmd already
+    def get_commands_and_test_info(self, encode: str = 'ascii') -> typing.Tuple[str, str, str, str]:
+        """ Based on a Factory pattern we can build the string taking into consideration how much a cmd already
         executed. For example, if we have 10 configurations on the __json_data_list, then the get_cmd will
-        select the one that is currently executing and did not complete __COMMAND_WINDOW time.
+        select the one that is currently executing and did not complete __command_window time.
         :param encode: encode type, default ascii
         :return: cmd_exec and cmd_kill encoded strings
         """
-        # TODO: Check the timestamp of the command (probably a table that saves the it)
-        # The following code is not correct
-        machine_dict = self.__cmd_queue.pop()
+        now = time.time()
+        time_diff = now - self.__current_command["start_timestamp"]
+        # verify the timestamp first
+        if time_diff > self.__command_window:
+            self.__current_command = self.__cmd_queue.pop()
+            self.__current_command["start_timestamp"] = now
         self.__fill_the_queue()
-        cmd_exec = machine_dict["exec"].encode(encoding=encode)
-        cmd_kill = machine_dict["killcmd"].encode(encoding=encode)
-        code_name, code_header = "", ""
+        cmd_exec = self.__current_command["exec"].encode(encoding=encode)
+        cmd_kill = self.__current_command["killcmd"].encode(encoding=encode)
+        code_name = self.__current_command["codename"]
+        code_header = self.__current_command["header"]
         return cmd_exec, cmd_kill, code_name, code_header
 
 
 if __name__ == '__main__':
-    # TODO: FINISH and DEBUG-ME
-    pass
-# else:
-#     raise NotImplementedError("Please DEBUG-ME FIRST BEFORE INCLUDE IN THE MAIN PROJECT")
+    def debug():
+        # FOR DEBUG ONLY
+        print("CREATING THE MACHINE")
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
+            datefmt='%d-%m-%y %H:%M:%S',
+            filename="unit_test_log_Machine.log",
+            filemode='w'
+        )
+        command_factory = CommandFactory(json_files_list=["machines_cfgs/cuda_micro.json"],
+                                         logger_name="COMMAND_FACTORY",
+                                         command_window=5)
+
+        print("Executing command factory")
+        first = command_factory.get_commands_and_test_info()[0]
+        for it in range(20):
+            time.sleep(2)
+            sec = command_factory.get_commands_and_test_info()[0]
+            if first == sec:
+                print(f"-------- IT {it} EQUAL AGAIN ----------------")
+
+
+    debug()
