@@ -73,7 +73,7 @@ class Machine(threading.Thread):
         if os.path.isdir(self.__dut_log_path) is False:
             os.mkdir(self.__dut_log_path)
 
-        self.__dut_log_obj = None
+        self.__dut_log_message = None
         # Configure the socket
         self.__messages_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.__messages_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -103,13 +103,11 @@ class Machine(threading.Thread):
         last_reboot_timestamp = time.time()
         sequentially_reboots = 0
         # Start the app for the first time
-        try_i = 0
-        while self.__start_app() != ErrorCodes.SUCCESS and try_i <= self.__MAX_START_APP_TRIES:
-            try_i += 1
+        self.__start_app()
         while self.__stop_event.is_set():
             try:
                 data, address = self.__messages_socket.recvfrom(self.__DATA_SIZE)
-                self.__dut_log_obj.log_message(message=data)
+                self.__dut_log_message(message=data)
                 last_message_timestamp = time.time()
             except TimeoutError:
                 if lower_threshold <= last_message_timestamp <= upper_threshold:
@@ -125,48 +123,47 @@ class Machine(threading.Thread):
                             # fake reboot setting to start trying again
                             last_reboot_timestamp = time.time()
 
-                    # try __MAX_START_APP_TRIES times to start the app on the DUT
-                    try_i = 0
-                    while self.__start_app() != ErrorCodes.SUCCESS and try_i <= self.__MAX_START_APP_TRIES:
-                        try_i += 1
+                    # Try to start the app again
+                    self.__start_app()
 
-    def __start_app(self):
+    def __start_app(self) -> None:
         """ Start the app on the DUT
         :return:
         """
-        try:
-            tn = telnetlib.Telnet(self.__ip, timeout=30)
-            tn.read_until(b'ogin: ', timeout=30)
-            tn.write(self.__dut_username.encode('ascii') + b'\n')
-            tn.read_very_eager()
-            if self.__dut_password != "":
-                tn.read_until(b'assword: ', timeout=30)
-                tn.write(self.__dut_password.encode('ascii') + b'\n')
-            tn.read_until(b'$ ', timeout=30)
+        # try __MAX_START_APP_TRIES times to start the app on the DUT
+        try_i = 0
+        while try_i <= self.__MAX_START_APP_TRIES:
+            try:
+                tn = telnetlib.Telnet(self.__ip, timeout=30)
+                tn.read_until(b'ogin: ', timeout=30)
+                tn.write(self.__dut_username.encode('ascii') + b'\n')
+                tn.read_very_eager()
+                if self.__dut_password != "":
+                    tn.read_until(b'assword: ', timeout=30)
+                    tn.write(self.__dut_password.encode('ascii') + b'\n')
+                tn.read_until(b'$ ', timeout=30)
 
-            # This process is being redesigned to become a Factory
-            # The commands are already encoded
-            cmd_line_run, cmd_line_pkill, test_name, header = self.__command_factory.get_commands_and_test_info()
-            del self.__dut_log_obj
-            # TODO: Generalize the ECC getting
-            self.__dut_log_obj = DUTLogging(log_dir=self.__dut_log_path, test_name=test_name, test_header=header,
-                                            hostname=self.__dut_hostname, ecc_config="OFF")
-            tn.write(cmd_line_pkill)
-            tn.read_very_eager()
-            tn.write(cmd_line_run)
-            tn.read_very_eager()
-            time.sleep(0.1)
-            tn.close()
-
-        except (OSError, EOFError) as e:
-            if e.errno == errno.EHOSTUNREACH:
-                self.__logger.exception(f"Host unreachable IP:{self.__ip} HOSTNAME:{self.__dut_hostname}")
-                return ErrorCodes.REBOOTING
-            self.__logger.exception(
-                f"Wait for a boot and connection from IP:{self.__ip} HOSTNAME:{self.__dut_hostname}")
-            return ErrorCodes.WAITING_FOR_POSSIBLE_BOOT
-
-        return ErrorCodes.SUCCESS
+                # This process is being redesigned to become a Factory
+                # The commands are already encoded
+                cmd_line_run, cmd_line_pkill, test_name, header = self.__command_factory.get_commands_and_test_info()
+                self.__dut_log_message = DUTLogging(log_dir=self.__dut_log_path, test_name=test_name,
+                                                    test_header=header, hostname=self.__dut_hostname,
+                                                    logger_name=self.__logger_name)
+                tn.write(cmd_line_pkill)
+                tn.read_very_eager()
+                tn.write(cmd_line_run)
+                tn.read_very_eager()
+                # Never sleep with time, but with event wait
+                self.__stop_event.wait(0.1)
+                tn.close()
+                # If it reaches here the app is running
+                break
+            except (OSError, EOFError) as e:
+                if e.errno == errno.EHOSTUNREACH:
+                    self.__logger.exception(f"Host unreachable IP:{self.__ip} HOSTNAME:{self.__dut_hostname}")
+                self.__logger.exception(
+                    f"Wait for a boot and connection from IP:{self.__ip} HOSTNAME:{self.__dut_hostname}")
+            try_i += 1
 
     def join(self, *args, **kwargs) -> None:
         """ Stop the main function before join the thread
