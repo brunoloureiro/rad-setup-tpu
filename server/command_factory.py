@@ -9,6 +9,7 @@ _ONE_HOUR_WINDOW = 3600
 
 class CommandFactory:
     def __init__(self, json_files_list: list, logger_name: str, command_window: int = _ONE_HOUR_WINDOW):
+        self.__current_command_kill = None
         self.__command_window = command_window
         self.__json_data_list = list()
         self.__logger = logging.getLogger(f"{logger_name}.{__name__}")
@@ -34,6 +35,10 @@ class CommandFactory:
             self.__cmd_queue = collections.deque(self.__json_data_list)
 
     @property
+    def current_cmd_kill(self):
+        return self.__current_command_kill
+
+    @property
     def is_command_window_timeout(self):
         """ Only checks if the self.__current_command is outside execute window
         :return:
@@ -57,6 +62,7 @@ class CommandFactory:
             self.__current_command["start_timestamp"] = time.time()
         cmd_exec = self.__current_command["exec"].encode(encoding=encode)
         cmd_kill = self.__current_command["killcmd"].encode(encoding=encode)
+        self.__current_command_kill = cmd_kill
         code_name = self.__current_command["codename"]
         code_header = self.__current_command["header"]
         return cmd_exec, cmd_kill, code_name, code_header

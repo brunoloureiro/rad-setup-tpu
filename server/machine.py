@@ -25,7 +25,7 @@ class Machine(threading.Thread):
     __REBOOT_AGAIN_INTERVAL_AFTER_BOOT_PROBLEM = 3600
 
     # Data receive size in bytes
-    __DATA_SIZE = 1024
+    __DATA_SIZE = 256
 
     # Num of start app tries
     __MAX_START_APP_TRIES = 4
@@ -83,7 +83,7 @@ class Machine(threading.Thread):
         super(Machine, self).__init__(*args, **kwargs)
 
     def __str__(self) -> str:
-        return f"IP:{self.__ip} HOSTNAME:{self.__dut_hostname} PORT:{self.__receiving_port}"
+        return f"IP:{self.__ip} HOSTNAME:{self.__dut_hostname} RECPORT:{self.__receiving_port}"
 
     def run(self):
         # Run execution of thread
@@ -95,7 +95,7 @@ class Machine(threading.Thread):
                                          switch_port=self.__switch_port, switch_ip=self.__switch_ip,
                                          logger_name=self.__logger_name)
         if turn_on_status != ErrorCodes.SUCCESS:
-            self.__logger.error(f"Failed to turn ON the IP:{self.__ip} HOSTNAME:{self.__dut_hostname}")
+            self.__logger.error(f"Failed to turn ON the str(self)")
 
         # Control logging timestamps for the machine
         last_message_timestamp = time.time()
@@ -111,7 +111,8 @@ class Machine(threading.Thread):
                 last_message_timestamp = time.time()
             except TimeoutError:
                 if lower_threshold <= last_message_timestamp <= upper_threshold:
-                    pass
+                    if self.__command_factory.is_command_window_timeout:
+                        self.__kill_app()
                 elif last_message_timestamp > upper_threshold:
                     # The last connection was too late, reboot the machine
                     if last_reboot_timestamp > self.__diff_reboot:
@@ -126,22 +127,43 @@ class Machine(threading.Thread):
                     # Try to start the app again
                     self.__start_app()
 
+    def __telnet_login(self) -> telnetlib.Telnet:
+        """Perform login on telnet before one operation
+        :return the telnet object
+        """
+        tn = telnetlib.Telnet(self.__ip, timeout=30)
+        tn.read_until(b'ogin: ', timeout=30)
+        tn.write(self.__dut_username.encode('ascii') + b'\n')
+        tn.read_very_eager()
+        if self.__dut_password != "":
+            tn.read_until(b'assword: ', timeout=30)
+            tn.write(self.__dut_password.encode('ascii') + b'\n')
+        tn.read_until(b'$ ', timeout=30)
+        return tn
+
+    def __kill_app(self) -> None:
+        # try __MAX_START_APP_TRIES times to start the app on the DUT
+        for try_i in range(self.__MAX_START_APP_TRIES):
+            try:
+                tn = self.__telnet_login()
+                tn.write(self.__command_factory.current_cmd_kill)
+                tn.read_very_eager()
+                # Never sleep with time, but with event wait
+                self.__stop_event.wait(0.1)
+                tn.close()
+                # If it reaches here the app is running
+                break
+            finally:
+                self.__logger.info(f"Command execution not successful, trying {try_i}")
+
     def __start_app(self) -> None:
         """ Start the app on the DUT
         :return:
         """
         # try __MAX_START_APP_TRIES times to start the app on the DUT
-        try_i = 0
-        while try_i <= self.__MAX_START_APP_TRIES:
+        for try_i in range(self.__MAX_START_APP_TRIES):
             try:
-                tn = telnetlib.Telnet(self.__ip, timeout=30)
-                tn.read_until(b'ogin: ', timeout=30)
-                tn.write(self.__dut_username.encode('ascii') + b'\n')
-                tn.read_very_eager()
-                if self.__dut_password != "":
-                    tn.read_until(b'assword: ', timeout=30)
-                    tn.write(self.__dut_password.encode('ascii') + b'\n')
-                tn.read_until(b'$ ', timeout=30)
+                tn = self.__telnet_login()
 
                 # This process is being redesigned to become a Factory
                 # The commands are already encoded
@@ -160,10 +182,11 @@ class Machine(threading.Thread):
                 break
             except (OSError, EOFError) as e:
                 if e.errno == errno.EHOSTUNREACH:
-                    self.__logger.exception(f"Host unreachable IP:{self.__ip} HOSTNAME:{self.__dut_hostname}")
+                    self.__logger.exception(f"Host unreachable str(self)")
                 self.__logger.exception(
-                    f"Wait for a boot and connection from IP:{self.__ip} HOSTNAME:{self.__dut_hostname}")
-            try_i += 1
+                    f"Wait for a boot and connection from str(self)")
+            finally:
+                self.__logger.info(f"Command execution not successful, trying {try_i}")
 
     def join(self, *args, **kwargs) -> None:
         """ Stop the main function before join the thread
@@ -191,7 +214,7 @@ class Machine(threading.Thread):
         if off_status != ErrorCodes.SUCCESS or on_status != ErrorCodes.SUCCESS:
             reboot_msg = f"Reboot failed for"
             reboot_status = off_status if off_status != ErrorCodes.SUCCESS else on_status
-        reboot_msg += f" IP:{self.__ip} HOSTNAME:{self.__dut_hostname} STATUS:{reboot_status}"
+        reboot_msg += f" str(self) STATUS:{reboot_status}"
         reboot_msg += f" PORT_NUMBER: {self.__switch_port} SWITCH_IP: {self.__switch_ip}"
         self.__logger.info(reboot_msg)
         return last_reboot_timestamp
@@ -247,17 +270,17 @@ if __name__ == '__main__':
 #             self.__logger.info(reboot_msg)
 #         elif kind == ErrorCodes.WAITING_FOR_POSSIBLE_BOOT:
 #             self.__logger.debug(
-#                 f"Waiting for a possible boot in the future from IP:{self.__ip} HOSTNAME:{self.__dut_hostname}")
+#                 f"Waiting for a possible boot in the future from str(self)")
 #         elif kind == ErrorCodes.BOOT_PROBLEM:
-#             reboot_msg = f"Boot Problem IP:{self.__ip} HOSTNAME:{self.__dut_hostname}. "
+#             reboot_msg = f"Boot Problem str(self). "
 #             reboot_msg += f"The thread will wait for a connection for {self.__boot_problem_max_delta}s"
 #             self.__logger.error(reboot_msg)
 #         elif kind == ErrorCodes.MAX_SEQ_REBOOT_REACHED:
 #             self.__logger.error(
-#                 f"Maximum number of reboots allowed reached for IP:{self.__ip} HOSTNAME:{self.__dut_hostname}")
+#                 f"Maximum number of reboots allowed reached for str(self)")
 #         elif kind == ErrorCodes.TURN_ON:
 #             self.__logger.info(
-#                 f"Turning ON IP:{self.__ip} HOSTNAME:{self.__dut_hostname} STATUS:{self.__reboot_status}")
+#                 f"Turning ON str(self) STATUS:{self.__reboot_status}")
 #         elif kind == ErrorCodes.APP_CRASH:
 #             reboot_msg = f"App Restarted IP:{self.__ip}"
 #             self.__logger.error(reboot_msg)

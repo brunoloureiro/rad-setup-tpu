@@ -8,6 +8,7 @@ parameters.
 import json
 import logging
 import os
+import subprocess
 import time
 import typing
 
@@ -18,6 +19,12 @@ from error_codes import ErrorCodes
 # Switches status, only used in this module
 __ON = "ON"
 __OFF = "OFF"
+
+# Check if curl is available
+try:
+    subprocess.call(["curl", "--help"], stdout=subprocess.PIPE)
+except OSError:
+    raise OSError("CURL is not available, please install curl before using this module")
 
 
 def _execute_command(cmd: str) -> ErrorCodes:
@@ -102,8 +109,7 @@ def _common_switch_command(status: str, switch_ip: str, switch_port: int) -> Err
     cmd = 'curl --data \"'
     cmd += port_default_cmd % ("On" if status == __ON else "Off")
     cmd += '&Apply=Apply\" '
-    cmd += f'http://%s/tgi/iocontrol.tgi {switch_ip}'
-    cmd += '-o /dev/null '
+    cmd += f'http://{switch_ip}/tgi/iocontrol.tgi -o /dev/null '
     return _execute_command(cmd)
 
 
@@ -162,17 +168,24 @@ def turn_machine_on(address: str, switch_model: str, switch_port: int, switch_ip
 
 
 if __name__ == '__main__':
-    # FOR DEBUG ONLY
-    # TODO: DEBUG the functions
-    print("CREATING THE RebootMachine")
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
-        datefmt='%m-%d %H:%M',
-        filename="unit_test_log_RebootMachine.log",
-        filemode='w'
-    )
-    reboot = reboot_machine(address="192.168.1.11", switch_model="lindy", switch_port=1,
-                            switch_ip="192.168.1.102", rebooting_sleep=10, logger_name="REBOOT-MACHINE_LOG")
+    def debug():
+        print("Debugging reboot machine")
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
+            datefmt='%m-%d %H:%M',
+            filename="unit_test_log_RebootMachine.log",
+            filemode='w'
+        )
+        # add the handler to the root logger
+        logging.getLogger('').addHandler(logging.StreamHandler())
 
-    print(f"Reboot status OFF {reboot[0]} ON {reboot[1]}")
+        reboot = reboot_machine(address="192.168.1.11", switch_model="default", switch_port=1,
+                                switch_ip="192.168.1.100", rebooting_sleep=10, logger_name="REBOOT-MACHINE_LOG")
+        print(f"Reboot status OFF={reboot[0]} ON={reboot[1]}")
+
+        turn_machine_on(address="192.168.1.11", switch_model="default", switch_port=1, switch_ip="192.168.1.100",
+                        logger_name="REBOOT-MACHINE_LOG")
+
+
+    debug()
