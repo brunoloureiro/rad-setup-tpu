@@ -181,8 +181,8 @@ class Machine(threading.Thread):
                 self.__logger.exception(
                     f"Wait for a boot and connection ConnectionRefusedError USER:{self.__dut_username} "
                     f"HOSTNAME:{self.__dut_hostname} IP:{self.__dut_ip}")
-            finally:
-                self.__logger.info(f"Command execution not successful, trying {try_i}")
+
+            self.__logger.info(f"Command execution not successful, trying {try_i}")
         return ErrorCodes.CONNECTION_ERROR
 
     def __hard_reboot(self):
