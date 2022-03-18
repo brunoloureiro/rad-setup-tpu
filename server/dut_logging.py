@@ -3,6 +3,7 @@ Module to log the info received from the devices
 """
 import enum
 import logging
+import os
 import struct
 
 from datetime import datetime
@@ -10,14 +11,14 @@ from datetime import datetime
 
 class EndStatus(enum.Enum):
     NORMAL_END = "#END"
-    SAME_ERROR_LAST_ITERATION = "#ABORT: amount of errors equals of the last iteration"
-    TOO_MANY_ERRORS = "#ABORT: too many errors per iteration"
     APPLICATION_CRASH = "#DUE: system crash"
     POWER_CYCLE = "#DUE: power cycle"
 
-    def __str__(self): return self.name
+    def __str__(self):
+        return self.name
 
-    def __repr__(self): return str(self)
+    def __repr__(self):
+        return str(self)
 
 
 class DUTLogging:
@@ -41,45 +42,57 @@ class DUTLogging:
         self.__hostname = hostname
         self.__logger = logging.getLogger(f"{logger_name}.{__name__}")
         # Create the file when the first message arrives
-        self.__is_file_created = False
+        self.__filename = None
         self.__endianness = endianness
 
     def __create_new_file(self, ecc_status: int):
-        if self.__is_file_created is False:
+        if self.__filename is None:
             ecc_config = "OFF" if ecc_status == 0 else "ON"
             # log example: 2021_11_15_22_08_25_cuda_trip_half_lava_ECC_OFF_fernando.log
             date = datetime.today()
             date_fmt = date.strftime('%Y_%m_%d_%H_%M_%S')
-            self.__filename = f"{self.__log_dir}/{date_fmt}_{self.__test_name}_ECC_{ecc_config}_{self.__hostname}.log"
+            log_filename = f"{self.__log_dir}/{date_fmt}_{self.__test_name}_ECC_{ecc_config}_{self.__hostname}.log"
             # Writing the header to the file
             try:
-                with open(self.__filename, "w") as log_file:
-                    begin_str = f"#BEGIN Y:{date.year} M:{date.month} D:{date.day} "
+                with open(log_filename, "w") as log_file:
+                    begin_str = f"#SERVER_BEGIN Y:{date.year} M:{date.month} D:{date.day} "
                     begin_str += f"Time:{date.hour}:{date.minute}:{date.second}-{date.microsecond}\n"
-                    log_file.write(f"#HEADER {self.__test_header}\n")
+                    log_file.write(f"#SERVER_HEADER {self.__test_header}\n")
                     log_file.write(begin_str)
-                    self.__is_file_created = True
+                    self.__filename = log_filename
             except OSError:
-                self.__logger.exception(f"Could not create the file {self.__filename}")
-                self.__is_file_created = False
+                self.__logger.exception(f"Could not create the file {log_filename}")
 
     def __call__(self, message: bytes, *args, **kwargs) -> None:
         """ Log a message from the DUT
         :param message: a message is composed of
         <first byte ecc status>
-        <2 next bytes size of the message in bytes max 32764>
-        <message of maximum 32764 bytes>
-        1 byte for ecc + 2 bytes for message length + 32764 maximum message content = 32767 bytes
+        <message of maximum 1023 bytes>
+        1 byte for ecc + 1023 maximum message content = 1024 bytes
         """
-        endianness = ">" if self.__endianness == "big-endian" else "<"
         ecc_status = int(message[0])
         self.__create_new_file(ecc_status=ecc_status)
-        print(message[0:3])
-
-        message_size = struct.unpack(f'{endianness}H', message[1:3])[0]
-        message_content = message[3:message_size].decode("ascii")
+        message_content = message[1:].decode("ascii")
         with open(self.__filename, "a") as log_file:
             log_file.write(message_content + "\n")
+
+    def finish_this_dut_log(self, end_status: EndStatus = EndStatus.NORMAL_END):
+        """ Destructor of the class
+        Check if the file exists and put an END in the last line
+        :param end_status status of the ending of the log
+        EndStatus:
+            NORMAL_END = "#END"
+            APPLICATION_CRASH = "#DUE: system crash"
+            POWER_CYCLE = "#DUE: power cycle"
+        """
+        if os.path.isfile(self.__filename):
+            with open(self.__filename, "a") as log_file:
+                date_fmt = datetime.today().strftime('%Y-%m-%d-%H-%M-%S')
+                log_file.write(f"({date_fmt}) {end_status}")
+
+    @property
+    def log_filename(self):
+        return self.__filename
 
 
 if __name__ == '__main__':
@@ -94,18 +107,23 @@ if __name__ == '__main__':
             filemode='w'
         )
         dut_logging = DUTLogging(
-            log_dir="/tmp/",
+            log_dir="/tmp",
             test_name="DebugTest",
             test_header="Testing DUT_LOGGING",
             hostname="carol",
             endianness="little-endian",
             logger_name="DUT_LOGGING"
         )
+        print("Not valid name", dut_logging.log_filename)
+        ecc = 0
         for i in range(100):
             mss_content = f"Testing iteration {i}"
-            packed = struct.pack("<H", len(mss_content))
-            mss = bytes(0) + packed + mss_content.encode("ascii")
+            print("MSG:", mss_content)
+            ecc_status = struct.pack("<b", ecc)
+            mss = ecc_status + mss_content.encode("ascii")
             dut_logging(message=mss)
+        print("Log filename", dut_logging.log_filename)
+        dut_logging(message=bytes(struct.pack("<b", ecc)) + "#END".encode("ascii"))
 
 
     debug()

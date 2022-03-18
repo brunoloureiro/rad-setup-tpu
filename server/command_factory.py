@@ -23,15 +23,24 @@ class CommandFactory:
 
         # Transform __json_data_list into a FIFO to manage the codes testing
         self.__cmd_queue = collections.deque()
-        self.__fill_the_queue()
+        self.__check_and_refill_the_queue()
         self.__current_command = self.__cmd_queue.pop()
         self.__current_command["start_timestamp"] = time.time()
 
-    def __fill_the_queue(self):
+    def __check_and_refill_the_queue(self):
         """ Fill or re-fill the command queue """
         if not self.__cmd_queue:
             self.__logger.debug("Re-filling the queue of commands")
             self.__cmd_queue = collections.deque(self.__json_data_list)
+
+    @property
+    def is_command_window_timeout(self):
+        """ Only checks if the self.__current_command is outside execute window
+        :return:
+        """
+        now = time.time()
+        time_diff = now - self.__current_command["start_timestamp"]
+        return time_diff > self.__command_window
 
     def get_commands_and_test_info(self, encode: str = 'ascii') -> typing.Tuple[str, str, str, str]:
         """ Based on a Factory pattern we can build the string taking into consideration how much a cmd already
@@ -40,13 +49,12 @@ class CommandFactory:
         :param encode: encode type, default ascii
         :return: cmd_exec and cmd_kill encoded strings
         """
-        now = time.time()
-        time_diff = now - self.__current_command["start_timestamp"]
+        self.__check_and_refill_the_queue()
+
         # verify the timestamp first
-        if time_diff > self.__command_window:
+        if self.is_command_window_timeout:
             self.__current_command = self.__cmd_queue.pop()
-            self.__current_command["start_timestamp"] = now
-        self.__fill_the_queue()
+            self.__current_command["start_timestamp"] = time.time()
         cmd_exec = self.__current_command["exec"].encode(encoding=encode)
         cmd_kill = self.__current_command["killcmd"].encode(encoding=encode)
         code_name = self.__current_command["codename"]
