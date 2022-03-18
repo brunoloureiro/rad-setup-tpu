@@ -173,6 +173,7 @@ class Machine(threading.Thread):
                 self.__stop_event.wait(0.1)
                 tn.close()
                 # If it reaches here the app is running
+                self.__logger.info(f"Command execution successful, trying {try_i}")
                 return ErrorCodes.SUCCESS
             except (OSError, EOFError) as e:
                 if e.errno == errno.EHOSTUNREACH:
@@ -257,8 +258,8 @@ if __name__ == '__main__':
 
         print("EXECUTING THE MACHINE")
         machine.start()
-        print(f"SLEEPING THE MACHINE FOR {300}s")
-        time.sleep(300)
+        print(f"SLEEPING THE MACHINE FOR {500}s")
+        time.sleep(500)
 
         print("JOINING THE MACHINE")
         machine.join()
