@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import subprocess
+import threading
 import time
 import typing
 
@@ -132,8 +133,9 @@ def _select_command_on_switch(status: str, switch_model: str, switch_port: int, 
 
 
 def reboot_machine(address: str, switch_model: str, switch_port: int, switch_ip: str, rebooting_sleep: float,
-                   logger_name: str) -> typing.Tuple[ErrorCodes, ErrorCodes]:
+                   logger_name: str, thread_event: threading.Event = None) -> typing.Tuple[ErrorCodes, ErrorCodes]:
     """Public function to reboot a machine
+    :param thread_event:
     :param address: Address of the machine that is being rebooted
     :param switch_model: model of the switch. Supported now default and lindy
     :param switch_port: port to reboot
@@ -146,7 +148,11 @@ def reboot_machine(address: str, switch_model: str, switch_port: int, switch_ip:
     logger.info(f"Rebooting machine: {address}, switch IP: {switch_ip}, switch switch_port: {switch_port}")
     off_status = _select_command_on_switch(status=__OFF, switch_model=switch_model, switch_port=switch_port,
                                            switch_ip=switch_ip, logger=logger)
-    time.sleep(rebooting_sleep)
+    if thread_event:
+        thread_event.wait(rebooting_sleep)
+    else:
+        time.sleep(rebooting_sleep)
+
     on_status = _select_command_on_switch(status=__ON, switch_model=switch_model, switch_port=switch_port,
                                           switch_ip=switch_ip, logger=logger)
     return off_status, on_status
@@ -181,11 +187,11 @@ if __name__ == '__main__':
         logging.getLogger('').addHandler(logging.StreamHandler())
 
         reboot = reboot_machine(address="192.168.1.11", switch_model="default", switch_port=1,
-                                switch_ip="192.168.1.100", rebooting_sleep=10, logger_name="REBOOT-MACHINE_LOG")
+                                switch_ip="192.168.1.100", rebooting_sleep=10, logger_name="REBOOT_MACHINE_LOG")
         print(f"Reboot status OFF={reboot[0]} ON={reboot[1]}")
 
         turn_machine_on(address="192.168.1.11", switch_model="default", switch_port=1, switch_ip="192.168.1.100",
-                        logger_name="REBOOT-MACHINE_LOG")
+                        logger_name="REBOOT_MACHINE_LOG")
 
 
     debug()

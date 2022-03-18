@@ -76,9 +76,12 @@ if __name__ == '__main__':
             level=logging.DEBUG,
             format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
             datefmt='%d-%m-%y %H:%M:%S',
-            filename="unit_test_log_Machine.log",
+            filename="unit_test_log_CommandFactory.log",
             filemode='w'
         )
+        # add the handler to the root logger
+        logging.getLogger('').addHandler(logging.StreamHandler())
+
         command_factory = CommandFactory(json_files_list=["machines_cfgs/cuda_micro.json"],
                                          logger_name="COMMAND_FACTORY",
                                          command_window=5)
@@ -90,6 +93,7 @@ if __name__ == '__main__':
             sec = command_factory.get_commands_and_test_info()[0]
             if first == sec:
                 print(f"-------- IT {it} EQUAL AGAIN ----------------")
-
+        time.sleep(1)
+        print(command_factory.is_command_window_timeout)
 
     debug()

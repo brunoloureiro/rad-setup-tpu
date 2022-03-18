@@ -3,7 +3,6 @@ Module to log the info received from the devices
 """
 import enum
 import logging
-import os
 import struct
 
 from datetime import datetime
@@ -57,7 +56,7 @@ class DUTLogging:
                     log_file.write(f"#SERVER_HEADER {self.__test_header}\n")
                     log_file.write(begin_str)
                     self.__filename = log_filename
-            except OSError:
+            except (OSError, PermissionError):
                 self.__logger.exception(f"Could not create the file {log_filename}")
 
     def __call__(self, message: bytes, *args, **kwargs) -> None:
@@ -70,8 +69,11 @@ class DUTLogging:
         ecc_status = int(message[0])
         self.__create_new_file(ecc_status=ecc_status)
         message_content = message[1:].decode("ascii")
-        with open(self.__filename, "a") as log_file:
-            log_file.write(message_content + "\n")
+        if self.__filename:
+            with open(self.__filename, "a") as log_file:
+                log_file.write(message_content + "\n")
+        else:
+            self.__logger.exception("[ERROR in __call__(message) Unable to open file]")
 
     def finish_this_dut_log(self, end_status: EndStatus = EndStatus.NORMAL_END):
         """ Destructor of the class
@@ -82,7 +84,7 @@ class DUTLogging:
             APPLICATION_CRASH = "#DUE: system crash"
             POWER_CYCLE = "#DUE: power cycle"
         """
-        if os.path.isfile(self.__filename):
+        if self.__filename:
             with open(self.__filename, "a") as log_file:
                 date_fmt = datetime.today().strftime('%Y-%m-%d-%H-%M-%S')
                 log_file.write(f"({date_fmt}) {end_status}")
@@ -103,6 +105,9 @@ if __name__ == '__main__':
             filename="unit_test_log_DUTLogging.log",
             filemode='w'
         )
+        # add the handler to the root logger
+        logging.getLogger('').addHandler(logging.StreamHandler())
+
         dut_logging = DUTLogging(
             log_dir="/tmp",
             test_name="DebugTest",
@@ -112,7 +117,7 @@ if __name__ == '__main__':
         )
         print("Not valid name", dut_logging.log_filename)
         ecc = 0
-        for i in range(100):
+        for i in range(10):
             mss_content = f"Testing iteration {i}"
             print("MSG:", mss_content)
             ecc_status = struct.pack("<b", ecc)

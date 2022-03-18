@@ -207,7 +207,8 @@ class Machine(threading.Thread):
                                                switch_port=self.__switch_port,
                                                switch_ip=self.__switch_ip,
                                                rebooting_sleep=self.__reboot_sleep_time,
-                                               logger_name=self.__logger_name)
+                                               logger_name=self.__logger_name,
+                                               thread_event=self.__stop_event)
 
         reboot_msg = f"Rebooted"
         reboot_status = ErrorCodes.SUCCESS
