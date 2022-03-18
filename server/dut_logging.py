@@ -9,12 +9,14 @@ from datetime import datetime
 
 
 class EndStatus(enum.Enum):
-    NORMAL_END = "#END"
-    APPLICATION_CRASH = "#DUE: system crash"
-    POWER_CYCLE = "#DUE: power cycle"
+    NORMAL_END = "#SERVER_END"
+    APPLICATION_CRASH = "#SERVER_DUE: system crash"
+    POWER_CYCLE = "#SERVER_DUE: power cycle"
+    TIMEOUT = "#SERVER_DUE: not receiving messages"
+    UNKNOWN = "#SERVER_UNKNOWN"
 
     def __str__(self):
-        return self.name
+        return self.value
 
     def __repr__(self):
         return str(self)
@@ -75,19 +77,20 @@ class DUTLogging:
         else:
             self.__logger.exception("[ERROR in __call__(message) Unable to open file]")
 
-    def finish_this_dut_log(self, end_status: EndStatus = EndStatus.NORMAL_END):
-        """ Destructor of the class
-        Check if the file exists and put an END in the last line
-        :param end_status status of the ending of the log
-        EndStatus:
-            NORMAL_END = "#END"
-            APPLICATION_CRASH = "#DUE: system crash"
-            POWER_CYCLE = "#DUE: power cycle"
+    def finish_this_dut_log(self, end_status: EndStatus):
+        """ Check if the file exists and put an END in the last line
+        :param end_status status of the ending of the log EndStatus
         """
         if self.__filename:
             with open(self.__filename, "a") as log_file:
                 date_fmt = datetime.today().strftime('%Y-%m-%d-%H-%M-%S')
-                log_file.write(f"({date_fmt}) {end_status}")
+                log_file.write(f"{end_status} - TIME:{date_fmt}\n")
+                self.__filename = None
+
+    def __del__(self):
+        # If it is not finished it should
+        if self.__filename:
+            self.finish_this_dut_log(end_status=EndStatus.UNKNOWN)
 
     @property
     def log_filename(self):
@@ -124,7 +127,7 @@ if __name__ == '__main__':
             mss = ecc_status + mss_content.encode("ascii")
             dut_logging(message=mss)
         print("Log filename", dut_logging.log_filename)
-        dut_logging(message=bytes(struct.pack("<b", ecc)) + "#END".encode("ascii"))
+        # dut_logging.finish_this_dut_log(EndStatus.NORMAL_END)
 
 
     debug()

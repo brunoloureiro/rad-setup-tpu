@@ -35,7 +35,7 @@ class CommandFactory:
             self.__cmd_queue = collections.deque(self.__json_data_list)
 
     @property
-    def current_cmd_kill(self):
+    def current_cmd_kill(self) -> bytes:
         return self.__current_command_kill
 
     @property
@@ -47,7 +47,7 @@ class CommandFactory:
         time_diff = now - self.__current_command["start_timestamp"]
         return time_diff > self.__command_window
 
-    def get_commands_and_test_info(self, encode: str = 'ascii') -> typing.Tuple[str, str, str, str]:
+    def get_commands_and_test_info(self, encode: str = 'ascii') -> typing.Tuple[str, str, str]:
         """ Based on a Factory pattern we can build the string taking into consideration how much a cmd already
         executed. For example, if we have 10 configurations on the __json_data_list, then the get_cmd will
         select the one that is currently executing and did not complete __command_window time.
@@ -65,7 +65,7 @@ class CommandFactory:
         self.__current_command_kill = cmd_kill
         code_name = self.__current_command["codename"]
         code_header = self.__current_command["header"]
-        return cmd_exec, cmd_kill, code_name, code_header
+        return cmd_exec, code_name, code_header
 
 
 if __name__ == '__main__':
@@ -95,5 +95,6 @@ if __name__ == '__main__':
                 print(f"-------- IT {it} EQUAL AGAIN ----------------")
         time.sleep(1)
         print(command_factory.is_command_window_timeout)
+
 
     debug()
