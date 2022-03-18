@@ -108,7 +108,6 @@ if __name__ == '__main__':
             test_name="DebugTest",
             test_header="Testing DUT_LOGGING",
             hostname="carol",
-            endianness="little-endian",
             logger_name="DUT_LOGGING"
         )
         print("Not valid name", dut_logging.log_filename)
