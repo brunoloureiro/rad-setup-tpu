@@ -27,14 +27,12 @@ class DUTLogging:
     each device used to perform in the past.
     """
 
-    def __init__(self, log_dir: str, test_name: str, test_header: str, hostname: str, logger_name: str,
-                 endianness: str):
+    def __init__(self, log_dir: str, test_name: str, test_header: str, hostname: str, logger_name: str):
         """ DUTLogging create the log file and writes the header on the first line
         :param log_dir: directory of the logfile
         :param test_name: Name of the test that will be performed, ex: cuda_lava_fp16, zedboard_lenet_int8, etc.
         :param test_header: Specific characteristics of the test, extracted from the configuration files
         :param hostname: Device hostname
-        :param endianness: if the DUT is big our little endian
         """
         self.__log_dir = log_dir
         self.__test_name = test_name
@@ -43,7 +41,6 @@ class DUTLogging:
         self.__logger = logging.getLogger(f"{logger_name}.{__name__}")
         # Create the file when the first message arrives
         self.__filename = None
-        self.__endianness = endianness
 
     def __create_new_file(self, ecc_status: int):
         if self.__filename is None:
