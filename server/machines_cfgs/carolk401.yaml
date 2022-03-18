@@ -4,7 +4,7 @@
 ip: 192.168.1.10
 
 # Port that the device will send data
-receive_port: 1300
+receive_port: 1024
 
 # diff_reboot delta to wait before reboot again
 diff_reboot: !!int 100
