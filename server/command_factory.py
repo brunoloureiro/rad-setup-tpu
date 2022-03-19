@@ -11,7 +11,6 @@ _ONE_HOUR_WINDOW = 3600
 
 class CommandFactory:
     def __init__(self, json_files_list: list, logger_name: str, command_window: int = _ONE_HOUR_WINDOW):
-        self.__current_command_kill = None
         self.__command_window = command_window
         self.__json_data_list = list()
         self.__logger = logging.getLogger(f"{logger_name}.{__name__}")
@@ -38,10 +37,6 @@ class CommandFactory:
             self.__cmd_queue = collections.deque(self.__json_data_list)
 
     @property
-    def current_cmd_kill(self) -> bytes:
-        return self.__current_command_kill
-
-    @property
     def is_command_window_timeout(self):
         """ Only checks if the self.__current_command is outside execute window
         :return:
@@ -50,7 +45,7 @@ class CommandFactory:
         time_diff = now - self.__current_command["start_timestamp"]
         return time_diff > self.__command_window
 
-    def get_commands_and_test_info(self, encode: str = 'ascii') -> typing.Tuple[str, str, str]:
+    def get_commands_and_test_info(self, encode: str = 'ascii') -> typing.Tuple[bytes, bytes, str, str]:
         """ Based on a Factory pattern we can build the string taking into consideration how much a cmd already
         executed. For example, if we have 10 configurations on the __json_data_list, then the get_cmd will
         select the one that is currently executing and did not complete __command_window time.
@@ -63,12 +58,20 @@ class CommandFactory:
         if self.is_command_window_timeout:
             self.__current_command = self.__cmd_queue.pop()
             self.__current_command["start_timestamp"] = time.time()
-        cmd_exec = self.__current_command["exec"].encode(encoding=encode)
-        cmd_kill = self.__current_command["killcmd"].encode(encoding=encode)
-        self.__current_command_kill = cmd_kill
+
+        # Following Pablo approach we need to make the process detach from the terminal
+        # 'nohup exec_code+...' &\r\n'
+        # Just to make sure that not concatenating duplicate
+        cmd_exec = self.__current_command["exec"].replace("nohup", "").replace("&\r\n", "")
+        cmd_exec = f"nohup {cmd_exec} &\r\n".encode(encoding=encode)
+
+        # Kill does not have nohup and &
+        cmd_kill = self.__current_command["killcmd"].replace("nohup", "")
+        cmd_kill = f"{cmd_kill} \r\n".encode(encoding=encode)
+
         code_name = self.__current_command["codename"]
         code_header = self.__current_command["header"]
-        return cmd_exec, code_name, code_header
+        return cmd_exec, cmd_kill, code_name, code_header
 
 
 if __name__ == '__main__':

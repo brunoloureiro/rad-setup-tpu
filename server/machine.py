@@ -103,9 +103,10 @@ class Machine(threading.Thread):
                 data, address = self.__messages_socket.recvfrom(self.__DATA_SIZE)
                 self.__dut_logging_obj(message=data)
                 sequentially_reboots = 0
-                if self.__command_factory.is_command_window_timeout:
-                    self.__soft_reboot(end_status=EndStatus.NORMAL_END)
                 self.__logger.debug(f"Connection from {self}")
+                if self.__command_factory.is_command_window_timeout:
+                    self.__logger.debug(f"Benchmark exceeded the command execution window, executing another one now.")
+                    self.__soft_reboot(end_status=EndStatus.NORMAL_END)
             except TimeoutError:
                 soft_reboot_status = self.__soft_reboot(end_status=EndStatus.TIMEOUT)
                 if soft_reboot_status != ErrorCodes.SUCCESS:
@@ -116,37 +117,6 @@ class Machine(threading.Thread):
                         self.__power_cycle_machine(self.__boot_problem_max_delta)
                         sequentially_reboots = 0
 
-    def __telnet_login(self) -> telnetlib.Telnet:
-        """Perform login on telnet before one operation
-        :return the telnet object
-        """
-        tn = telnetlib.Telnet(self.__dut_ip, timeout=30)
-        tn.read_until(b'ogin: ', timeout=30)
-        tn.write(self.__dut_username.encode('ascii') + b'\n')
-        tn.read_very_eager()
-        tn.read_until(b'assword: ', timeout=30)
-        tn.write(self.__dut_password.encode('ascii') + b'\n')
-        tn.read_until(b'$ ', timeout=30)
-        return tn
-
-    def __kill_app(self) -> ErrorCodes:
-        """ Try to kill the app on the host
-        :return: If the kill was successful or not
-        """
-        for try_i in range(self.__MAX_KILL_APP_TRIES):
-            try:
-                tn = self.__telnet_login()
-                tn.write(self.__command_factory.current_cmd_kill)
-                tn.read_very_eager()
-                # Never sleep with time, but with event wait
-                self.__stop_event.wait(0.1)
-                tn.close()
-                # If it reaches here the app is not running anymore
-                return ErrorCodes.SUCCESS
-            finally:
-                self.__logger.info(f"Kill app execution not successful, trying {try_i}")
-        return ErrorCodes.CONNECTION_ERROR
-
     def __start_app(self) -> ErrorCodes:
         """ Start the app on the DUT
         :return: If the start was successful or not
@@ -154,32 +124,43 @@ class Machine(threading.Thread):
         # try __MAX_START_APP_TRIES times to start the app on the DUT
         for try_i in range(self.__MAX_START_APP_TRIES):
             try:
-                tn = self.__telnet_login()
+                with telnetlib.Telnet(self.__dut_ip, timeout=30) as tn:
+                    tn.read_until(b'ogin: ', timeout=30)
+                    tn.write(self.__dut_username.encode('ascii') + b'\n')
+                    tn.read_very_eager()
+                    tn.read_until(b'assword: ', timeout=30)
+                    tn.write(self.__dut_password.encode('ascii') + b'\n')
+                    tn.read_until(b'$ ', timeout=30)
 
-                # This process is being redesigned to become a Factory
-                # The commands are already encoded
-                cmd_line_run, test_name, header = self.__command_factory.get_commands_and_test_info()
-                # Delete the current dut logging obj
-                del self.__dut_logging_obj
-                self.__dut_logging_obj = DUTLogging(log_dir=self.__dut_log_path, test_name=test_name,
-                                                    test_header=header, hostname=self.__dut_hostname,
-                                                    logger_name=self.__logger_name)
-                tn.write(cmd_line_run)
-                tn.read_very_eager()
-                # Never sleep with time, but with event wait
-                self.__stop_event.wait(0.1)
-                tn.close()
+                    # This process is being redesigned to become a Factory
+                    # The commands are already encoded
+                    cmd_line_run, cmd_kill, test_name, header = self.__command_factory.get_commands_and_test_info()
+                    # Delete the current dut logging obj
+                    del self.__dut_logging_obj
+                    self.__dut_logging_obj = DUTLogging(log_dir=self.__dut_log_path, test_name=test_name,
+                                                        test_header=header, hostname=self.__dut_hostname,
+                                                        logger_name=self.__logger_name)
+                    # Kill first
+                    tn.write(cmd_kill)
+                    tn.read_very_eager()
+                    # Never sleep with time, but with event wait
+                    self.__stop_event.wait(0.1)
+                    # Execute the command
+                    tn.write(cmd_line_run)
+                    tn.read_very_eager()
+                    # Never sleep with time, but with event wait
+                    self.__stop_event.wait(0.1)
                 # If it reaches here the app is running
-                self.__logger.info(f"Command execution successful, trying {try_i}")
+                self.__logger.info(f"SUCCESSFUL KILL:{cmd_kill} and CMD:{cmd_line_run} TRY:{try_i}")
                 return ErrorCodes.SUCCESS
             except (OSError, EOFError) as e:
                 if e.errno == errno.EHOSTUNREACH:
-                    self.__logger.exception(f"Host unreachable str(self)")
+                    self.__logger.exception(f"Host unreachable {self}")
                 self.__logger.exception(
                     f"Wait for a boot and connection ConnectionRefusedError USER:{self.__dut_username} "
                     f"HOSTNAME:{self.__dut_hostname} IP:{self.__dut_ip}")
 
-            self.__logger.info(f"Command execution not successful, trying {try_i}")
+            self.__logger.info(f"Command execution not successful TRY:{try_i}")
         return ErrorCodes.CONNECTION_ERROR
 
     def __hard_reboot(self):
@@ -197,7 +178,6 @@ class Machine(threading.Thread):
         :param end_status:
         """
         self.__dut_logging_obj.finish_this_dut_log(end_status=end_status)
-        self.__kill_app()
         return self.__start_app()
 
     def join(self, *args, **kwargs) -> None:
