@@ -108,6 +108,8 @@ class Machine(threading.Thread):
                     self.__logger.debug(f"Benchmark exceeded the command execution window, executing another one now.")
                     self.__soft_reboot(end_status=EndStatus.NORMAL_END)
             except TimeoutError:
+                self.__logger.info(f"TimeoutError error, doing soft app reboot on {self}.")
+                # FIXME: there is a difference between soft and soft app reboot
                 soft_reboot_status = self.__soft_reboot(end_status=EndStatus.TIMEOUT)
                 if soft_reboot_status != ErrorCodes.SUCCESS:
                     self.__hard_reboot()
