@@ -4,7 +4,7 @@ import logging
 import time
 import typing
 
-from server.logger_formatter import logging_setup
+from logger_formatter import logging_setup
 
 _ONE_HOUR_WINDOW = 3600
 

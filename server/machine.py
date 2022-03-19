@@ -12,7 +12,7 @@ from command_factory import CommandFactory
 from dut_logging import DUTLogging, EndStatus
 from error_codes import ErrorCodes
 from reboot_machine import reboot_machine, turn_machine_on
-from server.logger_formatter import logging_setup
+from logger_formatter import logging_setup
 
 
 class Machine(threading.Thread):
@@ -116,11 +116,6 @@ class Machine(threading.Thread):
                         self.__power_cycle_machine(self.__boot_problem_max_delta)
                         sequentially_reboots = 0
 
-    def __long_hard_reboot(self):
-        """ Turn off and on
-        :return:
-        """
-
     def __telnet_login(self) -> telnetlib.Telnet:
         """Perform login on telnet before one operation
         :return the telnet object
@@ -213,7 +208,7 @@ class Machine(threading.Thread):
         self.__stop_event.set()
         super(Machine, self).join(*args, **kwargs)
 
-    def __power_cycle_machine(self, reboot_sleep_time: float = None) -> float:
+    def __power_cycle_machine(self, reboot_sleep_time: float) -> float:
         """ reboot the device based on reboot_machine module
         :return reboot_status
         """

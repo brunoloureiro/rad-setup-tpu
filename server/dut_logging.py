@@ -6,7 +6,7 @@ import logging
 import struct
 from datetime import datetime
 
-from server.logger_formatter import logging_setup
+from logger_formatter import logging_setup
 
 
 class EndStatus(enum.Enum):
