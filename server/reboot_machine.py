@@ -81,19 +81,19 @@ def _lindy_switch(status: str, switch_port: int, switch_ip: str, logger: logging
         reboot_status = ErrorCodes.SUCCESS
     except requests.exceptions.HTTPError as http_error:
         reboot_status = ErrorCodes.HTTP_ERROR
-        logger.error(f"{default_string} {switch_port} status:{reboot_status} switchIP: {switch_ip} error:{http_error}")
+        logger.error(f"{default_string} {switch_port} status:{reboot_status} switchIP:{switch_ip} error:{http_error}")
     except requests.exceptions.ConnectionError as connection_error:
         reboot_status = ErrorCodes.CONNECTION_ERROR
         logger.error(
-            f"{default_string} {switch_port} status:{reboot_status} switchIP: {switch_ip} error:{connection_error}")
+            f"{default_string} {switch_port} status:{reboot_status} switchIP:{switch_ip} error:{connection_error}")
     except requests.exceptions.Timeout as timeout_error:
         reboot_status = ErrorCodes.TIMEOUT_ERROR
         logger.error(
-            f"{default_string} {switch_port} status:{reboot_status} switchIP: {switch_ip} error:{timeout_error}")
+            f"{default_string} {switch_port} status:{reboot_status} switchIP:{switch_ip} error:{timeout_error}")
     except requests.exceptions.RequestException as general_error:
         reboot_status = ErrorCodes.GENERAL_ERROR
         logger.error(
-            f"{default_string} {switch_port} status:{reboot_status} switchIP: {switch_ip} error:{general_error}")
+            f"{default_string} {switch_port} status:{reboot_status} switchIP:{switch_ip} error:{general_error}")
     return reboot_status
 
 
@@ -145,7 +145,7 @@ def reboot_machine(address: str, switch_model: str, switch_port: int, switch_ip:
     :return: a tuple containing the outcomes of the OFF and ON commands
     """
     logger = logging.getLogger(f"{logger_name}.{__name__}")
-    logger.info(f"Rebooting machine: {address}, switch IP: {switch_ip}, switch switch_port: {switch_port}")
+    logger.info(f"Rebooting machine: {address} switch_IP:{switch_ip} switch_port:{switch_port}")
     off_status = _select_command_on_switch(status=__OFF, switch_model=switch_model, switch_port=switch_port,
                                            switch_ip=switch_ip, logger=logger)
     if thread_event:
@@ -168,7 +168,7 @@ def turn_machine_on(address: str, switch_model: str, switch_port: int, switch_ip
     :return: ErrorCodes status
     """
     logger = logging.getLogger(f"{logger_name}.{__name__}")
-    logger.info(f"Turning ON machine: {address}, switch IP: {switch_ip}, switch switch_port: {switch_port}")
+    logger.info(f"Turning ON machine:{address} switch_IP:{switch_ip} switch_port:{switch_port}")
     return _select_command_on_switch(status=__ON, switch_model=switch_model, switch_port=switch_port,
                                      switch_ip=switch_ip, logger=logger)
 
