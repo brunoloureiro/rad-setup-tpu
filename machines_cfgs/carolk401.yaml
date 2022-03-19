@@ -41,6 +41,6 @@ max_timeout_time: !!int 10
 
 # Json files that contains the commands
 json_files: [
-#  "/home/fernando/git_research/radiation-setup/server/machines_cfgs/cuda_micro.json",
-    "/home/fernando/git_research/radiation-setup/server/machines_cfgs/dummy.json",
+#  "/home/fernando/git_research/radiation-setup/machines_cfgs/cuda_micro.json",
+    "/home/fernando/git_research/radiation-setup/machines_cfgs/dummy.json",
 ]
