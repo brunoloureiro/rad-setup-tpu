@@ -73,7 +73,8 @@ class DUTLogging:
         message_content = message[1:].decode("ascii")
         if self.__filename:
             with open(self.__filename, "a") as log_file:
-                log_file.write(message_content + "\n")
+                message_content += "\n" if "\n" not in message_content else ""
+                log_file.write(message_content)
         else:
             self.__logger.exception("[ERROR in __call__(message) Unable to open file]")
 

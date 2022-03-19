@@ -224,7 +224,7 @@ if __name__ == '__main__':
             configuration_file="../machines_cfgs/carolk401.yaml",
             server_ip="131.254.160.174",
             logger_name="MACHINE_LOG",
-            server_log_path="/tmp"
+            server_log_path="../machines_logs"
         )
 
         logger.debug("EXECUTING THE MACHINE")
