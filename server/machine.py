@@ -12,6 +12,7 @@ from command_factory import CommandFactory
 from dut_logging import DUTLogging, EndStatus
 from error_codes import ErrorCodes
 from reboot_machine import reboot_machine, turn_machine_on
+from server.logger_formatter import logging_setup
 
 
 class Machine(threading.Thread):
@@ -92,7 +93,7 @@ class Machine(threading.Thread):
                                          switch_port=self.__switch_port, switch_ip=self.__switch_ip,
                                          logger_name=self.__logger_name)
         if turn_on_status != ErrorCodes.SUCCESS:
-            self.__logger.error(f"Failed to turn ON the str(self)")
+            self.__logger.error(f"Failed to turn ON the {self}")
 
         sequentially_reboots = 0
         # Start the app for the first time
@@ -104,6 +105,7 @@ class Machine(threading.Thread):
                 sequentially_reboots = 0
                 if self.__command_factory.is_command_window_timeout:
                     self.__soft_reboot(end_status=EndStatus.NORMAL_END)
+                self.__logger.debug(f"Connection from {self}")
             except TimeoutError:
                 soft_reboot_status = self.__soft_reboot(end_status=EndStatus.TIMEOUT)
                 if soft_reboot_status != ErrorCodes.SUCCESS:
@@ -239,32 +241,24 @@ class Machine(threading.Thread):
 if __name__ == '__main__':
     def debug():
         # FOR DEBUG ONLY
-        print("CREATING THE MACHINE")
-        logging.basicConfig(
-            level=logging.DEBUG,
-            format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
-            datefmt='%d-%m-%y %H:%M:%S',
-            filename="unit_test_log_Machine.log",
-            filemode='w'
-        )
-        # add the handler to the root logger
-        logging.getLogger('').addHandler(logging.StreamHandler())
+        logger = logging_setup(logger_name="MACHINE_LOG", log_file="unit_test_log_Machine.log")
+        logger.debug("DEBUGGING THE MACHINE")
         machine = Machine(
-            configuration_file="machines_cfgs/carolk401.yaml",
+            configuration_file="../machines_cfgs/carolk401.yaml",
             server_ip="131.254.160.174",
             logger_name="MACHINE_LOG",
             server_log_path="/tmp"
         )
 
-        print("EXECUTING THE MACHINE")
+        logger.debug("EXECUTING THE MACHINE")
         machine.start()
-        print(f"SLEEPING THE MACHINE FOR {500}s")
+        logger.debug(f"SLEEPING THE MACHINE FOR {500}s")
         time.sleep(500)
 
-        print("JOINING THE MACHINE")
+        logger.debug("JOINING THE MACHINE")
         machine.join()
 
-        print("RAGE AGAINST THE MACHINE")
+        logger.debug("RAGE AGAINST THE MACHINE")
 
 
     debug()

@@ -1,8 +1,7 @@
 """
 Reboot machine functions. This is conceptually different from
 the radiation_benchmarks setup. Here we use only private functions, and the only
-public function is reboot_machine, which will reboot based on the
-parameters.
+public functions are reboot_machine turn_machine_on.
 """
 
 import json
@@ -16,6 +15,7 @@ import typing
 import requests
 
 from error_codes import ErrorCodes
+from server.logger_formatter import logging_setup
 
 # Switches status, only used in this module
 __ON = "ON"
@@ -175,20 +175,12 @@ def turn_machine_on(address: str, switch_model: str, switch_port: int, switch_ip
 
 if __name__ == '__main__':
     def debug():
-        print("Debugging reboot machine")
-        logging.basicConfig(
-            level=logging.DEBUG,
-            format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
-            datefmt='%m-%d %H:%M',
-            filename="unit_test_log_RebootMachine.log",
-            filemode='w'
-        )
-        # add the handler to the root logger
-        logging.getLogger('').addHandler(logging.StreamHandler())
+        logger = logging_setup(logger_name="REBOOT_MACHINE_LOG", log_file="unit_test_log_RebootMachine.log")
+        logger.debug("Debugging reboot machine")
 
         reboot = reboot_machine(address="192.168.1.11", switch_model="default", switch_port=1,
                                 switch_ip="192.168.1.100", rebooting_sleep=10, logger_name="REBOOT_MACHINE_LOG")
-        print(f"Reboot status OFF={reboot[0]} ON={reboot[1]}")
+        logger.debug(f"Reboot status OFF={reboot[0]} ON={reboot[1]}")
 
         turn_machine_on(address="192.168.1.11", switch_model="default", switch_port=1, switch_ip="192.168.1.100",
                         logger_name="REBOOT_MACHINE_LOG")

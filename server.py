@@ -1,37 +1,11 @@
 #!/usr/bin/python3
 import argparse
-import logging
 import os
 
 import yaml
 
-from logger_formatter import ColoredLogger
-from machine import Machine
-
-
-def logging_setup(logger_name: str, log_file: str) -> logging.Logger:
-    """Logging setup
-    :return: logger object
-    """
-    # create logger
-    logger = logging.getLogger(logger_name)
-    logger.setLevel(logging.DEBUG)
-    # create file handler which logs even debug messages
-    fh = logging.FileHandler(log_file, mode='a')
-    fh.setLevel(logging.INFO)
-    # create formatter and add it to the handlers
-    file_formatter = logging.Formatter(fmt='%(asctime)s %(name)s %(levelname)s %(message)s %(filename)s:%(lineno)d',
-                                       datefmt='%d-%m-%y %H:%M:%S')
-
-    # add the handlers to the logger
-    fh.setFormatter(file_formatter)
-    logger.addHandler(fh)
-
-    # create console handler with a higher log level for console
-    console = ColoredLogger(logger_name)
-    # noinspection PyTypeChecker
-    logger.addHandler(console)
-    return logger
+from server.logger_formatter import logging_setup
+from server.machine import Machine
 
 
 def main():

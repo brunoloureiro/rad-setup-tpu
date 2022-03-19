@@ -4,15 +4,15 @@ Module to log the info received from the devices
 import enum
 import logging
 import struct
-
 from datetime import datetime
+
+from server.logger_formatter import logging_setup
 
 
 class EndStatus(enum.Enum):
     NORMAL_END = "#SERVER_END"
-    APPLICATION_CRASH = "#SERVER_DUE: system crash"
-    POWER_CYCLE = "#SERVER_DUE: power cycle"
-    TIMEOUT = "#SERVER_DUE: not receiving messages"
+    POWER_CYCLE = "#SERVER_DUE:power cycle"
+    TIMEOUT = "#SERVER_DUE:not receiving messages"
     UNKNOWN = "#SERVER_UNKNOWN"
 
     def __str__(self):
@@ -43,7 +43,7 @@ class DUTLogging:
         # Create the file when the first message arrives
         self.__filename = None
 
-    def __create_new_file(self, ecc_status: int):
+    def __create_file_if_does_not_exist(self, ecc_status: int):
         if self.__filename is None:
             ecc_config = "OFF" if ecc_status == 0 else "ON"
             # log example: 2021_11_15_22_08_25_cuda_trip_half_lava_ECC_OFF_fernando.log
@@ -54,7 +54,7 @@ class DUTLogging:
             try:
                 with open(log_filename, "w") as log_file:
                     begin_str = f"#SERVER_BEGIN Y:{date.year} M:{date.month} D:{date.day} "
-                    begin_str += f"Time:{date.hour}:{date.minute}:{date.second}-{date.microsecond}\n"
+                    begin_str += f"TIME:{date.hour}:{date.minute}:{date.second}-{date.microsecond}\n"
                     log_file.write(f"#SERVER_HEADER {self.__test_header}\n")
                     log_file.write(begin_str)
                     self.__filename = log_filename
@@ -69,7 +69,7 @@ class DUTLogging:
         1 byte for ecc + 1023 maximum message content = 1024 bytes
         """
         ecc_status = int(message[0])
-        self.__create_new_file(ecc_status=ecc_status)
+        self.__create_file_if_does_not_exist(ecc_status=ecc_status)
         message_content = message[1:].decode("ascii")
         if self.__filename:
             with open(self.__filename, "a") as log_file:
@@ -84,7 +84,7 @@ class DUTLogging:
         if self.__filename:
             with open(self.__filename, "a") as log_file:
                 date_fmt = datetime.today().strftime('%Y-%m-%d-%H-%M-%S')
-                log_file.write(f"{end_status} - TIME:{date_fmt}\n")
+                log_file.write(f"{end_status} TIME:{date_fmt}\n")
                 self.__filename = None
 
     def __del__(self):
@@ -100,33 +100,22 @@ class DUTLogging:
 if __name__ == '__main__':
     def debug():
         # FOR DEBUG ONLY
-        print("CREATING THE MACHINE")
-        logging.basicConfig(
-            level=logging.DEBUG,
-            format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
-            datefmt='%d-%m-%y %H:%M:%S',
-            filename="unit_test_log_DUTLogging.log",
-            filemode='w'
-        )
-        # add the handler to the root logger
-        logging.getLogger('').addHandler(logging.StreamHandler())
-
-        dut_logging = DUTLogging(
-            log_dir="/tmp",
-            test_name="DebugTest",
-            test_header="Testing DUT_LOGGING",
-            hostname="carol",
-            logger_name="DUT_LOGGING"
-        )
-        print("Not valid name", dut_logging.log_filename)
+        logger = logging_setup(logger_name="DUT_LOGGING", log_file="unit_test_log_DUTLogging.log")
+        logger.debug("DEBUGGING THE DUT LOGGING")
+        dut_logging = DUTLogging(log_dir="/tmp",
+                                 test_name="DebugTest",
+                                 test_header="Testing DUT_LOGGING",
+                                 hostname="carol",
+                                 logger_name="DUT_LOGGING")
+        logger.debug(f"Not valid log name {dut_logging.log_filename}")
         ecc = 0
         for i in range(10):
             mss_content = f"Testing iteration {i}"
-            print("MSG:", mss_content)
+            logger.debug("MSG:" + mss_content)
             ecc_status = struct.pack("<b", ecc)
             mss = ecc_status + mss_content.encode("ascii")
             dut_logging(message=mss)
-        print("Log filename", dut_logging.log_filename)
+        logger.debug("Log filename " + dut_logging.log_filename)
         # dut_logging.finish_this_dut_log(EndStatus.NORMAL_END)
 
 
