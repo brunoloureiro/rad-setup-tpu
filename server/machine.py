@@ -98,7 +98,7 @@ class Machine(threading.Thread):
         sequentially_reboots = 0
         # Start the app for the first time
         self.__start_app()
-        while self.__stop_event.is_set():
+        while self.__stop_event.is_set() is False:
             try:
                 data, address = self.__messages_socket.recvfrom(self.__DATA_SIZE)
                 self.__dut_logging_obj(message=data)
