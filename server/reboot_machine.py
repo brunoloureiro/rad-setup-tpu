@@ -49,9 +49,10 @@ def _lindy_switch(status: str, switch_port: int, switch_ip: str, logger: logging
     :param logger: logging.Logger obj
     :return: ErrorCodes enum
     """
-    to_change = "000000000000000000000000"
-    led = f"{to_change[:(switch_port - 1)]}1{to_change[switch_port:]}"
-
+    # before: led = f"{to_change[:(switch_port - 1)]}1{to_change[switch_port:]}"
+    to_change = list("000000000000000000000000")
+    to_change[switch_port - 1] = "1"
+    led = "".join(to_change)
     if status == __ON:
         # TODO: Check if lindy switch accepts https protocol
         url = f'http://{switch_ip}/ons.cgi?led={led}'
@@ -178,7 +179,7 @@ if __name__ == '__main__':
         logger = logging_setup(logger_name="REBOOT_MACHINE_LOG", log_file="unit_test_log_RebootMachine.log")
         logger.debug("Debugging reboot machine")
 
-        reboot = reboot_machine(address="192.168.1.11", switch_model="default", switch_port=1,
+        reboot = reboot_machine(address="192.168.1.11", switch_model="lindy", switch_port=1,
                                 switch_ip="192.168.1.100", rebooting_sleep=10, logger_name="REBOOT_MACHINE_LOG")
         logger.debug(f"Reboot status OFF={reboot[0]} ON={reboot[1]}")
 

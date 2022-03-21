@@ -26,7 +26,7 @@ class Machine(threading.Thread):
     # Wait time to see if the board returns, 1800 = half an hour
     __LONG_REBOOT_WAIT_TIME_AFTER_PROBLEM = 1800
     # Data receive size in bytes
-    __DATA_SIZE = 256
+    __DATA_SIZE = 1024
     # Num of start app tries
     __MAX_TELNET_TRIES = 4
     # Max attempts to reboot the device
@@ -150,21 +150,11 @@ class Machine(threading.Thread):
             raise
 
         # First check if there is an app running
-        if self.__dut_logging_obj:
-            self.__dut_logging_obj.finish_this_dut_log(end_status=previous_log_end_status)
-            # Delete the current dut logging obj
-            del self.__dut_logging_obj
-            self.__logger.debug(f"Trying to perform a soft app reboot (app kill and run again) on {self}")
-        else:
-            self.__logger.debug(f"Starting the app on {self} for the first time")
+        self.__logger.debug(f"Soft app reboot (app kill and run again/start first time) on {self}")
 
         # self.__command_factory produces the commands that will be executed
         # The commands are already encoded
         cmd_line_run, cmd_kill, test_name, header = self.__command_factory.get_commands_and_test_info()
-        self.__dut_logging_obj = DUTLogging(log_dir=self.__dut_log_path, test_name=test_name,
-                                            test_header=header, hostname=self.__dut_hostname,
-                                            logger_name=self.__logger_name)
-
         # try __MAX_START_APP_TRIES times to start the app on the DUT
         for try_i in range(self.__MAX_TELNET_TRIES):
             try:
@@ -179,8 +169,16 @@ class Machine(threading.Thread):
                     tn.read_very_eager()
                     # Never sleep with time, but with event wait
                     self.__stop_event.wait(0.1)
-                # If it reaches here the app is running
-                self.__logger.info(f"SUCCESSFUL KILL:{cmd_kill} and CMD:{cmd_line_run} TRY:{try_i}")
+                    # If it reaches here the app is running
+                    self.__logger.info(f"SUCCESSFUL KILL:{cmd_kill} and CMD:{cmd_line_run} TRY:{try_i}")
+                    # Close the DUTLogging only if there is a log file open
+                    if self.__dut_logging_obj:
+                        self.__dut_logging_obj.finish_this_dut_log(end_status=previous_log_end_status)
+                        # Delete the current dut logging obj
+                        del self.__dut_logging_obj
+                    self.__dut_logging_obj = DUTLogging(log_dir=self.__dut_log_path, test_name=test_name,
+                                                        test_header=header, hostname=self.__dut_hostname,
+                                                        logger_name=self.__logger_name)
                 return ErrorCodes.SUCCESS
             except (OSError, EOFError) as e:
                 if e.errno == errno.EHOSTUNREACH:
@@ -196,7 +194,7 @@ class Machine(threading.Thread):
             THE KILL APP WILL MAKE THE LOGGING ENDING BASED ON THE EndStatus
         """
         self.__logger.debug("Trying to perform a soft Operating System reboot (OS reboot and run app)")
-        default_os_reboot_cmd = b"reboot\r\n"
+        default_os_reboot_cmd = b"sudo /sbin/reboot\r\n"
         for try_i in range(self.__MAX_TELNET_TRIES):
             try:
                 with self.__telnet_login() as tn:
@@ -204,7 +202,7 @@ class Machine(threading.Thread):
                     tn.write(default_os_reboot_cmd)
                     tn.read_very_eager()
                     # Never sleep with time, but with event wait
-                    self.__stop_event.wait(0.1)
+                    self.__stop_event.wait(1)
                 # If it reaches here the app is running
                 self.__logger.info(f"SUCCESSFUL REBOOT:{default_os_reboot_cmd} TRY:{try_i}")
                 # Wait the machine to boot

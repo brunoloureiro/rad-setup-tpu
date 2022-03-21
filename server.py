@@ -46,9 +46,11 @@ def main():
                 machine.start()
 
     except KeyboardInterrupt:
-        logger.info("Joining all threads")
+        logger.info("Stopping all threads")
         for machine in machines_dict:
             machine.stop()
+        logger.info("Joining all threads")
+        for machine in machines_dict:
             machine.join()
 
         logger.error("KeyboardInterrupt detected, exiting gracefully!( at least trying :) )")
