@@ -23,7 +23,7 @@ class MachineTestCase(unittest.TestCase):
         logger.debug("EXECUTING THE MACHINE")
         machine.start()
         logger.debug(f"SLEEPING THE MACHINE FOR {200}s")
-        time.sleep(120)
+        time.sleep(500)
 
         logger.debug("JOINING THE MACHINE")
         machine.stop()
