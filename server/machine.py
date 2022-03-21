@@ -8,11 +8,11 @@ import time
 
 import yaml
 
-from command_factory import CommandFactory
-from dut_logging import DUTLogging, EndStatus
-from error_codes import ErrorCodes
-from logger_formatter import logging_setup
-from reboot_machine import reboot_machine, turn_machine_on
+from .command_factory import CommandFactory
+from .dut_logging import DUTLogging, EndStatus
+from .error_codes import ErrorCodes
+from .logger_formatter import logging_setup
+from .reboot_machine import reboot_machine, turn_machine_on
 
 
 class Machine(threading.Thread):
@@ -46,7 +46,7 @@ class Machine(threading.Thread):
         """
         self.__logger_name = f"{logger_name}.{__name__}"
         self.__logger = logging.getLogger(self.__logger_name)
-        self.__logger.info("Creating a new Machine thread")
+        self.__logger.info(f"Creating a new Machine thread for IP {server_ip}")
 
         # load yaml file
         with open(configuration_file, 'r') as fp:
@@ -105,7 +105,8 @@ class Machine(threading.Thread):
                 sequentially_reboots = 0
                 self.__logger.debug(f"Connection from {self}")
                 if self.__command_factory.is_command_window_timed_out:
-                    self.__logger.info(f"Benchmark exceeded the command execution window, executing another one now.")
+                    self.__logger.info(
+                        f"Benchmark exceeded the command execution window, executing another one now on {self}.")
                     self.__soft_app_reboot(previous_log_end_status=EndStatus.NORMAL_END)
             except (TimeoutError, socket.timeout):
                 # Soft app reboot
@@ -146,11 +147,11 @@ class Machine(threading.Thread):
         """
         if previous_log_end_status is None and self.__dut_logging_obj is not None:
             self.__logger.exception(
-                "INCORRECT CONFIGURATION: previous_ending_status is None and self.__dut_logging_obj is Not None")
+                f"INCORRECT CONFIGURATION: previous_ending_status is None and __dut_logging_obj is Not None - {self}")
             raise
 
         # First check if there is an app running
-        self.__logger.debug(f"Soft app reboot (app kill and run again/start first time) on {self}")
+        self.__logger.info(f"Soft app reboot (app kill and run again/start first time) on {self}")
 
         # self.__command_factory produces the commands that will be executed
         # The commands are already encoded
@@ -170,7 +171,7 @@ class Machine(threading.Thread):
                     # Never sleep with time, but with event wait
                     self.__stop_event.wait(0.1)
                     # If it reaches here the app is running
-                    self.__logger.info(f"SUCCESSFUL KILL:{cmd_kill} and CMD:{cmd_line_run} TRY:{try_i}")
+                    self.__logger.info(f"SUCCESSFUL KILL:{cmd_kill} and CMD:{cmd_line_run} TRY:{try_i} on {self}")
                     # Close the DUTLogging only if there is a log file open
                     if self.__dut_logging_obj:
                         self.__dut_logging_obj.finish_this_dut_log(end_status=previous_log_end_status)
@@ -186,14 +187,14 @@ class Machine(threading.Thread):
                 else:
                     self.__logger.error(f"Waiting for a connection from {self} failed, trying telnet again")
 
-            self.__logger.info(f"Command execution not successful TRY:{try_i}")
+            self.__logger.info(f"Command execution not successful TRY:{try_i} on {self}")
         return ErrorCodes.TELNET_CONNECTION_ERROR
 
     def __soft_os_reboot(self):
         """ SOFT OS REBOOT: Reboot the operating system, or try to reboot using telnet
             THE KILL APP WILL MAKE THE LOGGING ENDING BASED ON THE EndStatus
         """
-        self.__logger.debug("Trying to perform a soft Operating System reboot (OS reboot and run app)")
+        self.__logger.info(f"Trying to perform a soft Operating System reboot (OS reboot and run app) on {self}")
         default_os_reboot_cmd = b"sudo /sbin/reboot\r\n"
         for try_i in range(self.__MAX_TELNET_TRIES):
             try:
@@ -204,7 +205,7 @@ class Machine(threading.Thread):
                     # Never sleep with time, but with event wait
                     self.__stop_event.wait(1)
                 # If it reaches here the app is running
-                self.__logger.info(f"SUCCESSFUL REBOOT:{default_os_reboot_cmd} TRY:{try_i}")
+                self.__logger.info(f"SUCCESSFUL REBOOT:{default_os_reboot_cmd} TRY:{try_i} on {self}")
                 # Wait the machine to boot
                 self.__stop_event.wait(self.__boot_waiting_time)
                 return self.__soft_app_reboot(previous_log_end_status=EndStatus.SOFT_OS_REBOOT)
@@ -220,8 +221,8 @@ class Machine(threading.Thread):
         """ reboot the device based on reboot_machine module
         :return reboot_status
         """
-        self.__logger.debug(
-            f"Trying to perform a hard reboot on the device (power cycle). The sleep interval is {reboot_sleep_time}")
+        self.__logger.info(
+            f"Trying to perform a hard reboot on device (power cycle). Sleep interval is {reboot_sleep_time} on {self}")
         off_status, on_status = reboot_machine(address=self.__dut_ip,
                                                switch_model=self.__switch_model,
                                                switch_port=self.__switch_port,

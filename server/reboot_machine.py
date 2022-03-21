@@ -14,8 +14,8 @@ import typing
 
 import requests
 
-from error_codes import ErrorCodes
-from logger_formatter import logging_setup
+from .error_codes import ErrorCodes
+from .logger_formatter import logging_setup
 
 # Switches status, only used in this module
 __ON = "ON"

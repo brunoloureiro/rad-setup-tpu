@@ -4,7 +4,7 @@ import logging
 import time
 import typing
 
-from logger_formatter import logging_setup
+from .logger_formatter import logging_setup
 
 _ONE_HOUR_WINDOW = 3600
 
@@ -34,7 +34,7 @@ class CommandFactory:
         """ Fill or re-fill the command queue """
         # If self.__cmd_queue is empty re-fill it
         if not self.__cmd_queue:
-            self.__logger.debug("Re-filling the queue of commands")
+            self.__logger.info("Re-filling the queue of commands")
             self.__cmd_queue = collections.deque(self.__json_data_list)
 
     @property

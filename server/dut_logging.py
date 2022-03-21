@@ -6,7 +6,7 @@ import logging
 import struct
 from datetime import datetime
 
-from logger_formatter import logging_setup
+from .logger_formatter import logging_setup
 
 
 class EndStatus(enum.Enum):
@@ -66,12 +66,12 @@ class DUTLogging:
         :param message: a message is composed of
         <first byte ecc status>
         On file_writer defined as:
-        #define ECC_ENABLED 0xEE
-        #define ECC_DISABLED 0xED
+        #define ECC_ENABLED 0xE
+        #define ECC_DISABLED 0xD
         <message of maximum 1023 bytes>
         1 byte for ecc + 1023 maximum message content = 1024 bytes
         """
-        ecc_values = {0xED: "OFF", 0xEE: "ON"}
+        ecc_values = {0xD: "OFF", 0xE: "ON"}
         ecc_status = ecc_values[message[0]]
         self.__create_file_if_does_not_exist(ecc_status=ecc_status)
         message_content = message[1:].decode("ascii")
