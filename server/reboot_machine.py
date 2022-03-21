@@ -15,7 +15,6 @@ import typing
 import requests
 
 from .error_codes import ErrorCodes
-from .logger_formatter import logging_setup
 
 # Switches status, only used in this module
 __ON = "ON"
@@ -172,19 +171,3 @@ def turn_machine_on(address: str, switch_model: str, switch_port: int, switch_ip
     logger.info(f"Turning ON machine:{address} switch_IP:{switch_ip} switch_port:{switch_port}")
     return _select_command_on_switch(status=__ON, switch_model=switch_model, switch_port=switch_port,
                                      switch_ip=switch_ip, logger=logger)
-
-
-if __name__ == '__main__':
-    def debug():
-        logger = logging_setup(logger_name="REBOOT_MACHINE_LOG", log_file="unit_test_log_RebootMachine.log")
-        logger.debug("Debugging reboot machine")
-
-        reboot = reboot_machine(address="192.168.1.11", switch_model="lindy", switch_port=1,
-                                switch_ip="192.168.1.100", rebooting_sleep=10, logger_name="REBOOT_MACHINE_LOG")
-        logger.debug(f"Reboot status OFF={reboot[0]} ON={reboot[1]}")
-
-        turn_machine_on(address="192.168.1.11", switch_model="default", switch_port=1, switch_ip="192.168.1.100",
-                        logger_name="REBOOT_MACHINE_LOG")
-
-
-    debug()

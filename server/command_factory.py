@@ -4,8 +4,6 @@ import logging
 import time
 import typing
 
-from .logger_formatter import logging_setup
-
 _ONE_HOUR_WINDOW = 3600
 
 
@@ -73,27 +71,3 @@ class CommandFactory:
         code_name = self.__current_command["codename"]
         code_header = self.__current_command["header"]
         return cmd_exec, cmd_kill, code_name, code_header
-
-
-if __name__ == '__main__':
-    def debug():
-        # FOR DEBUG ONLY
-        logger = logging_setup(logger_name="COMMAND_FACTORY", log_file="unit_test_log_CommandFactory.log")
-        logger.debug("DEBUGGING THE COMMAND FACTORY")
-        logger.debug("CREATING THE MACHINE")
-        command_factory = CommandFactory(json_files_list=["../machines_cfgs/cuda_micro.json"],
-                                         logger_name="COMMAND_FACTORY",
-                                         command_window=5)
-
-        logger.debug("Executing command factory")
-        first = command_factory.get_commands_and_test_info()[0]
-        for it in range(20):
-            time.sleep(2)
-            sec = command_factory.get_commands_and_test_info()[0]
-            if first == sec:
-                logger.debug(f"-------- IT {it} EQUAL AGAIN ----------------")
-        time.sleep(1)
-        logger.debug(str(command_factory.is_command_window_timed_out))
-
-
-    debug()

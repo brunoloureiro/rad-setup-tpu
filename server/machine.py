@@ -4,14 +4,12 @@ import os
 import socket
 import telnetlib
 import threading
-import time
 
 import yaml
 
 from .command_factory import CommandFactory
 from .dut_logging import DUTLogging, EndStatus
 from .error_codes import ErrorCodes
-from .logger_formatter import logging_setup
 from .reboot_machine import reboot_machine, turn_machine_on
 
 
@@ -130,13 +128,13 @@ class Machine(threading.Thread):
         """ Return a telnet session
         :return:
         """
-        tn = telnetlib.Telnet(self.__dut_ip, timeout=30)
-        tn.read_until(b'ogin: ', timeout=30)
+        tn = telnetlib.Telnet(self.__dut_ip, timeout=self.__max_timeout_time)
+        tn.read_until(b'ogin: ', timeout=self.__max_timeout_time)
         tn.write(self.__dut_username.encode('ascii') + b'\n')
         tn.read_very_eager()
-        tn.read_until(b'assword: ', timeout=30)
+        tn.read_until(b'assword: ', timeout=self.__max_timeout_time)
         tn.write(self.__dut_password.encode('ascii') + b'\n')
-        tn.read_until(b'$ ', timeout=30)
+        tn.read_until(b'$ ', timeout=self.__max_timeout_time)
         return tn
 
     def __soft_app_reboot(self, previous_log_end_status: EndStatus = None) -> ErrorCodes:
@@ -243,32 +241,3 @@ class Machine(threading.Thread):
     def stop(self) -> None:
         """ Stop the main function before join the thread """
         self.__stop_event.set()
-
-
-if __name__ == '__main__':
-    def debug():
-        # FOR DEBUG ONLY
-        logger = logging_setup(logger_name="MACHINE_LOG", log_file="unit_test_log_Machine.log")
-        logger.debug("DEBUGGING THE MACHINE")
-        server_log_path = "../logs"
-        if os.path.isdir(server_log_path) is False:
-            os.mkdir(server_log_path)
-        machine = Machine(
-            configuration_file="../machines_cfgs/carolk401.yaml",
-            server_ip="131.254.160.174",
-            logger_name="MACHINE_LOG",
-            server_log_path=server_log_path
-        )
-
-        logger.debug("EXECUTING THE MACHINE")
-        machine.start()
-        logger.debug(f"SLEEPING THE MACHINE FOR {500}s")
-        time.sleep(500)
-
-        logger.debug("JOINING THE MACHINE")
-        machine.stop()
-        machine.join()
-        logger.debug("RAGE AGAINST THE MACHINE")
-
-
-    debug()
