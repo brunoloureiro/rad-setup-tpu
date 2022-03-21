@@ -184,7 +184,7 @@ class Machine(threading.Thread):
                 if e.errno == errno.EHOSTUNREACH:
                     self.__logger.error(f"Host unreachable {self}")
                 else:
-                    self.__logger.error(f"Waiting for a connection from {self}, trying telnet again")
+                    self.__logger.error(f"Waiting for a connection from {self} failed, trying telnet again")
 
             self.__logger.info(f"Command execution not successful TRY:{try_i}")
         return ErrorCodes.TELNET_CONNECTION_ERROR
@@ -212,7 +212,7 @@ class Machine(threading.Thread):
                 if e.errno == errno.EHOSTUNREACH:
                     self.__logger.error(f"Host unreachable {self}")
                 else:
-                    self.__logger.error(f"Waiting for a connection from {self}, trying telnet again")
+                    self.__logger.error(f"Waiting for a connection from {self} failed, trying telnet again")
 
         return ErrorCodes.TELNET_CONNECTION_ERROR
 
