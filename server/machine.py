@@ -11,27 +11,28 @@ import yaml
 from command_factory import CommandFactory
 from dut_logging import DUTLogging, EndStatus
 from error_codes import ErrorCodes
-from reboot_machine import reboot_machine, turn_machine_on
 from logger_formatter import logging_setup
+from reboot_machine import reboot_machine, turn_machine_on
 
 
 class Machine(threading.Thread):
     """ Machine Thread
-    do not change the machine constants unless you
+    Each machine is attached to one Device Under Test (DUT),
+    it basically controls the status of the device and monitor it.
+    Do not change the machine constants unless you
     really know what you are doing, most of the constants
     describes the behavior of HARD reboot execution
     """
-    __MAX_REBOOT_THRESHOLD_TIMES = 3
-
+    # Wait time to see if the board returns, 1800 = half an hour
+    __LONG_REBOOT_WAIT_TIME_AFTER_PROBLEM = 1800
     # Data receive size in bytes
     __DATA_SIZE = 256
-
     # Num of start app tries
-    __MAX_START_APP_TRIES = 4
-    __MAX_KILL_APP_TRIES = 4
-
+    __MAX_TELNET_TRIES = 4
     # Max attempts to reboot the device
-    __MAX_ATTEMPTS_TO_REBOOT = 6
+    __MAX_ATTEMPTS_TO_HARD_REBOOT = 6
+    # Time in seconds between the POWER switch OFF and ON
+    __POWER_SWITCH_DEFAULT_TIME_REST = 2
 
     def __init__(self, configuration_file: str, server_ip: str, logger_name: str, server_log_path: str, *args,
                  **kwargs):
@@ -54,13 +55,10 @@ class Machine(threading.Thread):
         self.__dut_hostname = machine_parameters["hostname"]
         self.__dut_username = machine_parameters["username"]
         self.__dut_password = machine_parameters["password"]
-
-        self.__diff_reboot = machine_parameters["diff_reboot"]
         self.__switch_ip = machine_parameters["power_switch_ip"]
         self.__switch_port = machine_parameters["power_switch_port"]
         self.__switch_model = machine_parameters["power_switch_model"]
-        self.__boot_problem_max_delta = machine_parameters["boot_problem_max_delta"]
-        self.__reboot_sleep_time = machine_parameters["power_cycle_sleep_time"]
+        self.__boot_waiting_time = machine_parameters["boot_waiting_time"]
         self.__max_timeout_time = machine_parameters["max_timeout_time"]
         self.__receiving_port = machine_parameters["receive_port"]
 
@@ -84,7 +82,9 @@ class Machine(threading.Thread):
         super(Machine, self).__init__(*args, **kwargs)
 
     def __str__(self) -> str:
-        return f"IP:{self.__dut_ip} HOSTNAME:{self.__dut_hostname} RECPORT:{self.__receiving_port}"
+        dut_str = f"IP:{self.__dut_ip} USERNAME:{self.__dut_username} "
+        dut_str += f"HOSTNAME:{self.__dut_hostname} RECPORT:{self.__receiving_port}"
+        return dut_str
 
     def run(self):
         # Run execution of thread
@@ -97,51 +97,78 @@ class Machine(threading.Thread):
 
         sequentially_reboots = 0
         # Start the app for the first time
-        self.__start_app()
+        self.__soft_app_reboot()
         while self.__stop_event.is_set() is False:
             try:
                 data, address = self.__messages_socket.recvfrom(self.__DATA_SIZE)
                 self.__dut_logging_obj(message=data)
                 sequentially_reboots = 0
                 self.__logger.debug(f"Connection from {self}")
-                if self.__command_factory.is_command_window_timeout:
-                    self.__logger.debug(f"Benchmark exceeded the command execution window, executing another one now.")
-                    self.__soft_reboot(end_status=EndStatus.NORMAL_END)
+                if self.__command_factory.is_command_window_timed_out:
+                    self.__logger.info(f"Benchmark exceeded the command execution window, executing another one now.")
+                    self.__soft_app_reboot(previous_log_end_status=EndStatus.NORMAL_END)
             except (TimeoutError, socket.timeout):
-                self.__logger.info(f"TimeoutError error, doing soft app reboot on {self}.")
-                # FIXME: there is a difference between soft and soft app reboot
-                soft_reboot_status = self.__soft_reboot(end_status=EndStatus.TIMEOUT)
-                if soft_reboot_status != ErrorCodes.SUCCESS:
-                    self.__hard_reboot()
+                # Soft app reboot
+                soft_app_reboot_status = self.__soft_app_reboot(previous_log_end_status=EndStatus.SOFT_APP_REBOOT)
+                if soft_app_reboot_status == ErrorCodes.SUCCESS:
+                    continue
+                # Soft OS reboot
+                soft_os_reboot_status = self.__soft_os_reboot()
+                if soft_os_reboot_status == ErrorCodes.SUCCESS:
+                    continue
+                # Finally, the Power cycle Hard reboot
+                if sequentially_reboots <= self.__MAX_ATTEMPTS_TO_HARD_REBOOT:
+                    self.__hard_reboot(reboot_sleep_time=self.__POWER_SWITCH_DEFAULT_TIME_REST)
                     sequentially_reboots += 1
-                    if sequentially_reboots > self.__MAX_ATTEMPTS_TO_REBOOT:
-                        # We turn off for __REBOOT_AGAIN_INTERVAL_AFTER_BOOT_PROBLEM seconds
-                        self.__power_cycle_machine(self.__boot_problem_max_delta)
-                        sequentially_reboots = 0
+                elif sequentially_reboots > self.__MAX_ATTEMPTS_TO_HARD_REBOOT:
+                    # We turn off the device for __LONG_REBOOT_WAIT_TIME_AFTER_PROBLEM seconds
+                    self.__hard_reboot(reboot_sleep_time=self.__LONG_REBOOT_WAIT_TIME_AFTER_PROBLEM)
+                    sequentially_reboots = 0
 
-    def __start_app(self) -> ErrorCodes:
-        """ Start the app on the DUT
+    def __telnet_login(self) -> telnetlib.Telnet:
+        """ Return a telnet session
+        :return:
+        """
+        tn = telnetlib.Telnet(self.__dut_ip, timeout=30)
+        tn.read_until(b'ogin: ', timeout=30)
+        tn.write(self.__dut_username.encode('ascii') + b'\n')
+        tn.read_very_eager()
+        tn.read_until(b'assword: ', timeout=30)
+        tn.write(self.__dut_password.encode('ascii') + b'\n')
+        tn.read_until(b'$ ', timeout=30)
+        return tn
+
+    def __soft_app_reboot(self, previous_log_end_status: EndStatus = None) -> ErrorCodes:
+        """ kill and start an app on the device
+        :previous_log_end_status if it is not the first time that the device will run an app,
+        then pass the end_status, otherwise leave it None
         :return: If the start was successful or not
         """
-        # try __MAX_START_APP_TRIES times to start the app on the DUT
-        for try_i in range(self.__MAX_START_APP_TRIES):
-            try:
-                with telnetlib.Telnet(self.__dut_ip, timeout=30) as tn:
-                    tn.read_until(b'ogin: ', timeout=30)
-                    tn.write(self.__dut_username.encode('ascii') + b'\n')
-                    tn.read_very_eager()
-                    tn.read_until(b'assword: ', timeout=30)
-                    tn.write(self.__dut_password.encode('ascii') + b'\n')
-                    tn.read_until(b'$ ', timeout=30)
+        if previous_log_end_status is None and self.__dut_logging_obj is not None:
+            self.__logger.exception(
+                "INCORRECT CONFIGURATION: previous_ending_status is None and self.__dut_logging_obj is Not None")
+            raise
 
-                    # This process is being redesigned to become a Factory
-                    # The commands are already encoded
-                    cmd_line_run, cmd_kill, test_name, header = self.__command_factory.get_commands_and_test_info()
-                    # Delete the current dut logging obj
-                    del self.__dut_logging_obj
-                    self.__dut_logging_obj = DUTLogging(log_dir=self.__dut_log_path, test_name=test_name,
-                                                        test_header=header, hostname=self.__dut_hostname,
-                                                        logger_name=self.__logger_name)
+        # First check if there is an app running
+        if self.__dut_logging_obj:
+            self.__dut_logging_obj.finish_this_dut_log(end_status=previous_log_end_status)
+            # Delete the current dut logging obj
+            del self.__dut_logging_obj
+            self.__logger.debug(f"Trying to perform a soft app reboot (app kill and run again) on {self}")
+        else:
+            self.__logger.debug(f"Starting the app on {self} for the first time")
+
+        # self.__command_factory produces the commands that will be executed
+        # The commands are already encoded
+        cmd_line_run, cmd_kill, test_name, header = self.__command_factory.get_commands_and_test_info()
+        self.__dut_logging_obj = DUTLogging(log_dir=self.__dut_log_path, test_name=test_name,
+                                            test_header=header, hostname=self.__dut_hostname,
+                                            logger_name=self.__logger_name)
+
+        # try __MAX_START_APP_TRIES times to start the app on the DUT
+        for try_i in range(self.__MAX_TELNET_TRIES):
+            try:
+                with self.__telnet_login() as tn:
                     # Kill first
                     tn.write(cmd_kill)
                     tn.read_very_eager()
@@ -157,45 +184,46 @@ class Machine(threading.Thread):
                 return ErrorCodes.SUCCESS
             except (OSError, EOFError) as e:
                 if e.errno == errno.EHOSTUNREACH:
-                    self.__logger.exception(f"Host unreachable {self}")
-                self.__logger.exception(
-                    f"Wait for a boot and connection ConnectionRefusedError USER:{self.__dut_username} "
-                    f"HOSTNAME:{self.__dut_hostname} IP:{self.__dut_ip}")
+                    self.__logger.error(f"Host unreachable {self}")
+                else:
+                    self.__logger.error(f"Waiting for a connection from {self}, trying telnet again")
 
             self.__logger.info(f"Command execution not successful TRY:{try_i}")
-        return ErrorCodes.CONNECTION_ERROR
+        return ErrorCodes.TELNET_CONNECTION_ERROR
 
-    def __hard_reboot(self):
-        """HARD REBOOT OF THE MACHINE HERE"""
-        last_reboot_timestamp = self.__power_cycle_machine(reboot_sleep_time=self.__reboot_sleep_time)
-        self.__dut_logging_obj.finish_this_dut_log(end_status=EndStatus.POWER_CYCLE)
-        # Wait for the diff_reboot then try to start the app again
-        self.__stop_event.wait(self.__diff_reboot)
-        self.__start_app()
-        return last_reboot_timestamp
-
-    def __soft_reboot(self, end_status: EndStatus) -> ErrorCodes:
-        """ SOFT REBOOT HERE
+    def __soft_os_reboot(self):
+        """ SOFT OS REBOOT: Reboot the operating system, or try to reboot using telnet
             THE KILL APP WILL MAKE THE LOGGING ENDING BASED ON THE EndStatus
-        :param end_status:
         """
-        self.__dut_logging_obj.finish_this_dut_log(end_status=end_status)
-        return self.__start_app()
+        self.__logger.debug("Trying to perform a soft Operating System reboot (OS reboot and run app)")
+        default_os_reboot_cmd = b"reboot\r\n"
+        for try_i in range(self.__MAX_TELNET_TRIES):
+            try:
+                with self.__telnet_login() as tn:
+                    # OS reboot
+                    tn.write(default_os_reboot_cmd)
+                    tn.read_very_eager()
+                    # Never sleep with time, but with event wait
+                    self.__stop_event.wait(0.1)
+                # If it reaches here the app is running
+                self.__logger.info(f"SUCCESSFUL REBOOT:{default_os_reboot_cmd} TRY:{try_i}")
+                # Wait the machine to boot
+                self.__stop_event.wait(self.__boot_waiting_time)
+                return self.__soft_app_reboot(previous_log_end_status=EndStatus.SOFT_OS_REBOOT)
+            except (OSError, EOFError) as e:
+                if e.errno == errno.EHOSTUNREACH:
+                    self.__logger.error(f"Host unreachable {self}")
+                else:
+                    self.__logger.error(f"Waiting for a connection from {self}, trying telnet again")
 
-    def join(self, *args, **kwargs) -> None:
-        """ Stop the main function before join the thread
-        :param args: to be passed to the base class
-        :param kwargs: to be passed to the base class
-        """
-        self.__stop_event.set()
-        super(Machine, self).join(*args, **kwargs)
+        return ErrorCodes.TELNET_CONNECTION_ERROR
 
-    def __power_cycle_machine(self, reboot_sleep_time: float) -> float:
+    def __hard_reboot(self, reboot_sleep_time: float):
         """ reboot the device based on reboot_machine module
         :return reboot_status
         """
-        last_reboot_timestamp = time.time()
-        # Reboot machine in another thread
+        self.__logger.debug(
+            f"Trying to perform a hard reboot on the device (power cycle). The sleep interval is {reboot_sleep_time}")
         off_status, on_status = reboot_machine(address=self.__dut_ip,
                                                switch_model=self.__switch_model,
                                                switch_port=self.__switch_port,
@@ -203,16 +231,19 @@ class Machine(threading.Thread):
                                                rebooting_sleep=reboot_sleep_time,
                                                logger_name=self.__logger_name,
                                                thread_event=self.__stop_event)
-
-        reboot_msg = f"Rebooted"
-        reboot_status = ErrorCodes.SUCCESS
+        reboot_msg = f"REBOOT FOR - {self} POWER_SWITCH_PORT_NUMBER:{self.__switch_port} SWITCH_IP:{self.__switch_ip}"
         if off_status != ErrorCodes.SUCCESS or on_status != ErrorCodes.SUCCESS:
-            reboot_msg = f"Reboot failed for"
-            reboot_status = off_status if off_status != ErrorCodes.SUCCESS else on_status
-        reboot_msg += f" str(self) STATUS:{reboot_status}"
-        reboot_msg += f" PORT_NUMBER: {self.__switch_port} SWITCH_IP: {self.__switch_ip}"
-        self.__logger.info(reboot_msg)
-        return last_reboot_timestamp
+            reboot_msg += f" failed. ON_STATUS:{on_status} OFF_STATUS:{off_status}"
+            self.__logger.exception(reboot_msg)
+        else:
+            self.__logger.info(reboot_msg + " finished.")
+        # Wait the machine to boot
+        self.__stop_event.wait(self.__boot_waiting_time)
+        return self.__soft_app_reboot(previous_log_end_status=EndStatus.HARD_REBOOT)
+
+    def stop(self) -> None:
+        """ Stop the main function before join the thread """
+        self.__stop_event.set()
 
 
 if __name__ == '__main__':
@@ -236,8 +267,8 @@ if __name__ == '__main__':
         time.sleep(500)
 
         logger.debug("JOINING THE MACHINE")
+        machine.stop()
         machine.join()
-
         logger.debug("RAGE AGAINST THE MACHINE")
 
 

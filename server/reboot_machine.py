@@ -145,7 +145,7 @@ def reboot_machine(address: str, switch_model: str, switch_port: int, switch_ip:
     :return: a tuple containing the outcomes of the OFF and ON commands
     """
     logger = logging.getLogger(f"{logger_name}.{__name__}")
-    logger.info(f"Rebooting machine: {address} switch_IP:{switch_ip} switch_port:{switch_port}")
+    logger.info(f"Rebooting machine, IP:{address} switch_IP:{switch_ip} switch_port:{switch_port}")
     off_status = _select_command_on_switch(status=__OFF, switch_model=switch_model, switch_port=switch_port,
                                            switch_ip=switch_ip, logger=logger)
     if thread_event:

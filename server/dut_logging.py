@@ -11,8 +11,9 @@ from logger_formatter import logging_setup
 
 class EndStatus(enum.Enum):
     NORMAL_END = "#SERVER_END"
-    POWER_CYCLE = "#SERVER_DUE:power cycle"
-    TIMEOUT = "#SERVER_DUE:not receiving messages"
+    SOFT_APP_REBOOT = "#SERVER_DUE:soft APP reboot"
+    SOFT_OS_REBOOT = "#SERVER_DUE:soft OS reboot"
+    HARD_REBOOT = "#SERVER_DUE:power cycle"
     UNKNOWN = "#SERVER_UNKNOWN"
 
     def __str__(self):

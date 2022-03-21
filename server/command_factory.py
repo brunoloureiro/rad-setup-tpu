@@ -32,12 +32,13 @@ class CommandFactory:
 
     def __check_and_refill_the_queue(self):
         """ Fill or re-fill the command queue """
+        # If self.__cmd_queue is empty re-fill it
         if not self.__cmd_queue:
             self.__logger.debug("Re-filling the queue of commands")
             self.__cmd_queue = collections.deque(self.__json_data_list)
 
     @property
-    def is_command_window_timeout(self):
+    def is_command_window_timed_out(self):
         """ Only checks if the self.__current_command is outside execute window
         :return:
         """
@@ -55,7 +56,7 @@ class CommandFactory:
         self.__check_and_refill_the_queue()
 
         # verify the timestamp first
-        if self.is_command_window_timeout:
+        if self.is_command_window_timed_out:
             self.__current_command = self.__cmd_queue.pop()
             self.__current_command["start_timestamp"] = time.time()
 
@@ -92,7 +93,7 @@ if __name__ == '__main__':
             if first == sec:
                 logger.debug(f"-------- IT {it} EQUAL AGAIN ----------------")
         time.sleep(1)
-        logger.debug(str(command_factory.is_command_window_timeout))
+        logger.debug(str(command_factory.is_command_window_timed_out))
 
 
     debug()

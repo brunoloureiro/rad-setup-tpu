@@ -1,25 +1,17 @@
-from enum import Enum
+from enum import Enum, auto
 
 
 class ErrorCodes(Enum):
     """Error codes used to identify status in this test
     """
-    SUCCESS = 0
-
-    # Codes for Machine class
-    WAITING_BOOT_PROBLEM = 1
-    REBOOTING = 2
-    BOOT_PROBLEM = 3
-    WAITING_FOR_POSSIBLE_BOOT = 4
-    MAX_SEQ_REBOOT_REACHED = 5
-    TURN_ON = 6
-
+    SUCCESS = auto()
+    # When all tries of telnet failed
+    TELNET_CONNECTION_ERROR = auto()
     # Codes for RebootMachine
-    GENERAL_ERROR = 7
-    HTTP_ERROR = 8
-    CONNECTION_ERROR = 9
-    TIMEOUT_ERROR = 10
-    APP_CRASH = 11
+    GENERAL_ERROR = auto()
+    HTTP_ERROR = auto()
+    CONNECTION_ERROR = auto()
+    TIMEOUT_ERROR = auto()
 
     def __str__(self) -> str:
         """Override the str method
