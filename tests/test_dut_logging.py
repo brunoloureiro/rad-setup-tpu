@@ -16,7 +16,7 @@ class DUTLoggingTestCase(unittest.TestCase):
                                  hostname="carol",
                                  logger_name="DUT_LOGGING")
         logger.debug(f"Not valid log name {dut_logging.log_filename}")
-        ecc = 0
+        ecc = 13
         for i in range(10):
             mss_content = f"Testing iteration {i}"
             logger.debug("MSG:" + mss_content)
@@ -25,7 +25,8 @@ class DUTLoggingTestCase(unittest.TestCase):
             dut_logging(message=mss)
         logger.debug("Log filename " + dut_logging.log_filename)
         # dut_logging.finish_this_dut_log(EndStatus.NORMAL_END)
-        self.assertEqual(True, os.path.isfile(dut_logging.log_filename))  # add assertion here
+        self.assertEqual(True, os.path.isfile(
+            dut_logging.log_filename) and "ECC_OFF" in dut_logging.log_filename)  # add assertion here
 
 
 if __name__ == '__main__':
