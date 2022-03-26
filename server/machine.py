@@ -31,12 +31,10 @@ class Machine(threading.Thread):
     __MAX_ATTEMPTS_TO_HARD_REBOOT = 6
     __MAXIMUM_SEQUENTIALLY_SOFT_APP_REBOOTS = 10
     __MAXIMUM_SEQUENTIALLY_SOFT_OS_REBOOTS = 3
-    
+
     # Time in seconds between the POWER switch OFF and ON
     __POWER_SWITCH_DEFAULT_TIME_REST = 2
     __READ_EAGER_TIMEOUT = 1
-
-    
 
     def __init__(self, configuration_file: str, server_ip: str, logger_name: str, server_log_path: str, *args,
                  **kwargs):
@@ -82,11 +80,11 @@ class Machine(threading.Thread):
         self.__messages_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.__messages_socket.bind((server_ip, self.__receiving_port))
         self.__messages_socket.settimeout(self.__max_timeout_time)
-        
+
         # Variables to control rebooting (soft app and soft OS) process
-        __soft_app_reboot_count = 0
-        __soft_os_reboot_count = 0
-        __hard_reboot_count = 0
+        self.__soft_app_reboot_count = 0
+        self.__soft_os_reboot_count = 0
+        self.__hard_reboot_count = 0
 
         super(Machine, self).__init__(*args, **kwargs)
 
@@ -159,7 +157,7 @@ class Machine(threading.Thread):
             self.__logger.exception(
                 f"INCORRECT CONFIGURATION: previous_ending_status is None and __dut_logging_obj is Not None - {self}")
             raise
-           
+
         if self.__soft_app_reboot_count >= self.__MAXIMUM_SEQUENTIALLY_SOFT_APP_REBOOTS:
             self.__logger.info(f"MAXIMUM_APP_REBOOT_REACHED on {self}")
             return ErrorCodes.MAXIMUM_APP_REBOOT_REACHED
@@ -227,7 +225,7 @@ class Machine(threading.Thread):
                 self.__logger.info(f"SUCCESSFUL REBOOT:{default_os_reboot_cmd} TRY:{try_i} on {self}")
                 # Wait the machine to boot
                 self.__stop_event.wait(self.__boot_waiting_time)
-                
+
                 # Reset the soft app reboot as the system will be rebooted
                 self.__soft_app_reboot_count = 0
                 self.__soft_os_reboot_count += 1
