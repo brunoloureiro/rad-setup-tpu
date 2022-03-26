@@ -31,6 +31,7 @@ class Machine(threading.Thread):
     __MAX_ATTEMPTS_TO_HARD_REBOOT = 6
     # Time in seconds between the POWER switch OFF and ON
     __POWER_SWITCH_DEFAULT_TIME_REST = 2
+    __READ_EAGER_TIMEOUT = 1
 
     def __init__(self, configuration_file: str, server_ip: str, logger_name: str, server_log_path: str, *args,
                  **kwargs):
@@ -162,12 +163,12 @@ class Machine(threading.Thread):
                     tn.write(cmd_kill)
                     tn.read_very_eager()
                     # Never sleep with time, but with event wait
-                    self.__stop_event.wait(0.1)
+                    self.__stop_event.wait(self.__READ_EAGER_TIMEOUT)
                     # Execute the command
                     tn.write(cmd_line_run)
                     tn.read_very_eager()
                     # Never sleep with time, but with event wait
-                    self.__stop_event.wait(0.1)
+                    self.__stop_event.wait(self.__READ_EAGER_TIMEOUT)
                     # If it reaches here the app is running
                     self.__logger.info(f"SUCCESSFUL KILL:{cmd_kill} and CMD:{cmd_line_run} TRY:{try_i} on {self}")
                     # Close the DUTLogging only if there is a log file open
@@ -201,7 +202,7 @@ class Machine(threading.Thread):
                     tn.write(default_os_reboot_cmd)
                     tn.read_very_eager()
                     # Never sleep with time, but with event wait
-                    self.__stop_event.wait(1)
+                    self.__stop_event.wait(self.__READ_EAGER_TIMEOUT)
                 # If it reaches here the app is running
                 self.__logger.info(f"SUCCESSFUL REBOOT:{default_os_reboot_cmd} TRY:{try_i} on {self}")
                 # Wait the machine to boot
