@@ -12,6 +12,8 @@ class ErrorCodes(Enum):
     HTTP_ERROR = auto()
     CONNECTION_ERROR = auto()
     TIMEOUT_ERROR = auto()
+    MAXIMUM_APP_REBOOT_REACHED = auto()
+    MAXIMUM_OS_REBOOT_REACHED = auto()
 
     def __str__(self) -> str:
         """Override the str method
