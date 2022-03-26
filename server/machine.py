@@ -195,10 +195,8 @@ class Machine(threading.Thread):
                 self.__soft_app_reboot_count += 1
                 return ErrorCodes.SUCCESS
             except (OSError, EOFError) as e:
-                if e.errno == errno.EHOSTUNREACH:
-                    self.__logger.error(f"Host unreachable {self}")
-                else:
-                    self.__logger.error(f"Waiting for a connection from {self} failed, trying telnet again")
+                self.__logger.error(f"Host unreachable {self}. "
+                                    f"Waiting for a connection from {self} failed, trying telnet again")
 
             self.__logger.info(f"Command execution not successful TRY:{try_i} on {self}")
         return ErrorCodes.TELNET_CONNECTION_ERROR
@@ -231,10 +229,8 @@ class Machine(threading.Thread):
                 self.__soft_os_reboot_count += 1
                 return self.__soft_app_reboot(previous_log_end_status=EndStatus.SOFT_OS_REBOOT)
             except (OSError, EOFError) as e:
-                if e.errno == errno.EHOSTUNREACH:
-                    self.__logger.error(f"Host unreachable {self}")
-                else:
-                    self.__logger.error(f"Waiting for a connection from {self} failed, trying telnet again")
+                self.__logger.error(f"Host unreachable {self}. "
+                                    f"Waiting for a connection from {self} failed, trying telnet again")
 
         return ErrorCodes.TELNET_CONNECTION_ERROR
 
