@@ -116,7 +116,7 @@ class Machine(threading.Thread):
                 # TO AVOID making sequentially reboot when receiving good data
                 # THis is necessary to fix the behavior when a device keeps crashing for multiple times
                 # in a short period, but eventually comes to life again
-                connection_type_str = "HEADER|BEGIN|END|INF"
+                connection_type_str = "HEADER|BEGIN|END|INF|ERR"
                 if "#IT" in data.decode("ascii"):
                     connection_type_str = "ITERATION"
                     self.__soft_app_reboot_count = 0
@@ -187,7 +187,9 @@ class Machine(threading.Thread):
                     # Never sleep with time, but with event wait
                     self.__stop_event.wait(self.__READ_EAGER_TIMEOUT)
                     # If it reaches here the app is running
-                    self.__logger.info(f"SUCCESSFUL KILL:{cmd_kill} and CMD:{cmd_line_run} TRY:{try_i} on {self}")
+                    self.__logger.info(
+                        f"SUCCESSFUL KILL:{cmd_kill} and CMD:{cmd_line_run} "
+                        f"COUNTER{self.__soft_app_reboot_count} TRY:{try_i} on {self}")
                     # Close the DUTLogging only if there is a log file open
                     if self.__dut_logging_obj:
                         self.__dut_logging_obj.finish_this_dut_log(end_status=previous_log_end_status)
@@ -226,7 +228,8 @@ class Machine(threading.Thread):
                     # Never sleep with time, but with event wait
                     self.__stop_event.wait(self.__READ_EAGER_TIMEOUT)
                 # If it reaches here the app is running
-                self.__logger.info(f"SUCCESSFUL REBOOT:{default_os_reboot_cmd} TRY:{try_i} on {self}")
+                self.__logger.info(f"SUCCESSFUL OS REBOOT:{default_os_reboot_cmd} "
+                                   f"COUNTER:{self.__soft_os_reboot_count} TRY:{try_i} on {self}")
                 # Wait the machine to boot
                 self.__stop_event.wait(self.__boot_waiting_time)
 
@@ -258,7 +261,8 @@ class Machine(threading.Thread):
                                                rebooting_sleep=reboot_sleep_time,
                                                logger_name=self.__logger_name,
                                                thread_event=self.__stop_event)
-        reboot_msg = f"REBOOT FOR - {self} POWER_SWITCH_PORT_NUMBER:{self.__switch_port} SWITCH_IP:{self.__switch_ip}"
+        reboot_msg = f"HARD REBOOT FOR - {self} POWER_SWITCH_PORT_NUMBER:{self.__switch_port} "
+        reboot_msg += f"COUNTER:{self.__hard_reboot_count} SWITCH_IP:{self.__switch_ip}"
         if off_status != ErrorCodes.SUCCESS or on_status != ErrorCodes.SUCCESS:
             reboot_msg += f" failed. ON_STATUS:{on_status} OFF_STATUS:{off_status}"
             self.__logger.exception(reboot_msg)
