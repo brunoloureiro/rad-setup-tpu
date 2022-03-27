@@ -134,7 +134,8 @@ class Machine(threading.Thread):
                 if soft_app_reboot_status == ErrorCodes.SUCCESS:
                     continue
                 # Soft OS reboot
-                if self.__soft_os_reboot() == ErrorCodes.SUCCESS:
+                soft_os_reboot = self.__soft_os_reboot()
+                if soft_os_reboot == ErrorCodes.SUCCESS and soft_app_reboot_status != ErrorCodes.HOST_UNREACHABLE:
                     self.__soft_app_reboot(previous_log_end_status=EndStatus.SOFT_OS_REBOOT)
                     continue
                 # Finally, the Power cycle Hard reboot
