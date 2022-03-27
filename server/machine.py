@@ -1,4 +1,3 @@
-import errno
 import logging
 import os
 import socket
@@ -63,6 +62,9 @@ class Machine(threading.Thread):
         self.__boot_waiting_time = machine_parameters["boot_waiting_time"]
         self.__max_timeout_time = machine_parameters["max_timeout_time"]
         self.__receiving_port = machine_parameters["receive_port"]
+        self.__disable_os_soft_reboot = False
+        if "disable_os_soft_reboot" in machine_parameters:
+            self.__disable_os_soft_reboot = machine_parameters["disable_os_soft_reboot"] is True
 
         # Factory to manage the command execution
         self.__command_factory = CommandFactory(json_files_list=machine_parameters["json_files"],
@@ -103,14 +105,14 @@ class Machine(threading.Thread):
             self.__logger.error(f"Failed to turn ON the {self}")
 
         # This will control the power cycle number
-        hard_reboot_count = 0
+
         # Start the app for the first time
         self.__soft_app_reboot()
         while self.__stop_event.is_set() is False:
             try:
                 data, address = self.__messages_socket.recvfrom(self.__DATA_SIZE)
                 self.__dut_logging_obj(message=data)
-                hard_reboot_count = 0
+                self.__hard_reboot_count = 0
                 self.__logger.debug(f"Connection from {self}")
                 if self.__command_factory.is_command_window_timed_out:
                     self.__logger.info(
@@ -126,13 +128,7 @@ class Machine(threading.Thread):
                 if soft_os_reboot_status == ErrorCodes.SUCCESS:
                     continue
                 # Finally, the Power cycle Hard reboot
-                if hard_reboot_count <= self.__MAX_ATTEMPTS_TO_HARD_REBOOT:
-                    self.__hard_reboot(reboot_sleep_time=self.__POWER_SWITCH_DEFAULT_TIME_REST)
-                    hard_reboot_count += 1
-                elif hard_reboot_count > self.__MAX_ATTEMPTS_TO_HARD_REBOOT:
-                    # We turn off the device for __LONG_REBOOT_WAIT_TIME_AFTER_PROBLEM seconds
-                    self.__hard_reboot(reboot_sleep_time=self.__LONG_REBOOT_WAIT_TIME_AFTER_PROBLEM)
-                    hard_reboot_count = 0
+                self.__hard_reboot()
 
     def __telnet_login(self) -> telnetlib.Telnet:
         """ Return a telnet session
@@ -194,9 +190,8 @@ class Machine(threading.Thread):
                                                         logger_name=self.__logger_name)
                 self.__soft_app_reboot_count += 1
                 return ErrorCodes.SUCCESS
-            except (OSError, EOFError) as e:
-                self.__logger.error(f"Host unreachable {self}. "
-                                    f"Waiting for a connection from {self} failed, trying telnet again")
+            except (OSError, EOFError):
+                self.__logger.error(f"Host unreachable, waiting for a connection from {self}, trying telnet again")
 
             self.__logger.info(f"Command execution not successful TRY:{try_i} on {self}")
         return ErrorCodes.TELNET_CONNECTION_ERROR
@@ -205,6 +200,9 @@ class Machine(threading.Thread):
         """ SOFT OS REBOOT: Reboot the operating system, or try to reboot using telnet
             THE KILL APP WILL MAKE THE LOGGING ENDING BASED ON THE EndStatus
         """
+        if self.__disable_os_soft_reboot is True:
+            return ErrorCodes.DISABLED_SOFT_OS_REBOOT
+
         if self.__soft_app_reboot_count >= self.__MAXIMUM_SEQUENTIALLY_SOFT_OS_REBOOTS:
             self.__logger.info(f"MAXIMUM_OS_REBOOT_REACHED on {self}")
             return ErrorCodes.MAXIMUM_OS_REBOOT_REACHED
@@ -228,16 +226,21 @@ class Machine(threading.Thread):
                 self.__soft_app_reboot_count = 0
                 self.__soft_os_reboot_count += 1
                 return self.__soft_app_reboot(previous_log_end_status=EndStatus.SOFT_OS_REBOOT)
-            except (OSError, EOFError) as e:
-                self.__logger.error(f"Host unreachable {self}. "
-                                    f"Waiting for a connection from {self} failed, trying telnet again")
+            except (OSError, EOFError):
+                self.__logger.error(f"Host unreachable, waiting for a connection from {self}, trying telnet again")
 
         return ErrorCodes.TELNET_CONNECTION_ERROR
 
-    def __hard_reboot(self, reboot_sleep_time: float):
+    def __hard_reboot(self):
         """ reboot the device based on reboot_machine module
         :return reboot_status
         """
+        reboot_sleep_time = self.__POWER_SWITCH_DEFAULT_TIME_REST
+        if self.__hard_reboot_count > self.__MAX_ATTEMPTS_TO_HARD_REBOOT:
+            # We turn off the device for __LONG_REBOOT_WAIT_TIME_AFTER_PROBLEM seconds
+            reboot_sleep_time = self.__LONG_REBOOT_WAIT_TIME_AFTER_PROBLEM
+            self.__hard_reboot_count = 0
+
         self.__logger.info(
             f"Trying to perform a hard reboot on device (power cycle). Sleep interval is {reboot_sleep_time} on {self}")
         off_status, on_status = reboot_machine(address=self.__dut_ip,

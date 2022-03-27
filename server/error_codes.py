@@ -14,6 +14,7 @@ class ErrorCodes(Enum):
     TIMEOUT_ERROR = auto()
     MAXIMUM_APP_REBOOT_REACHED = auto()
     MAXIMUM_OS_REBOOT_REACHED = auto()
+    DISABLED_SOFT_OS_REBOOT = auto()
 
     def __str__(self) -> str:
         """Override the str method
