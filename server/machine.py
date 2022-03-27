@@ -157,16 +157,16 @@ class Machine(threading.Thread):
         boot_waiting_upper_threshold = self.__boot_waiting_time * 2
         current_timestamp = start_timestamp = time.time()
         while (current_timestamp - start_timestamp) <= boot_waiting_upper_threshold:
+            self.__stop_event.wait(1)
             current_timestamp = time.time()
             try:
                 with self.__telnet_login():
                     return ErrorCodes.SUCCESS
             except OSError as e:
                 if e.errno == errno.EHOSTUNREACH:
-                    self.__logger.error(f"Host unreachable {self} ")
+                    self.__logger.error(f"Boot host unreachable {self} ")
                     return ErrorCodes.HOST_UNREACHABLE
             except EOFError:
-                self.__stop_event.wait(1)
                 continue
 
         return ErrorCodes.TELNET_CONNECTION_ERROR
