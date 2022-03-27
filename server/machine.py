@@ -203,7 +203,7 @@ class Machine(threading.Thread):
         if self.__disable_os_soft_reboot is True:
             return ErrorCodes.DISABLED_SOFT_OS_REBOOT
 
-        if self.__soft_app_reboot_count >= self.__MAXIMUM_SEQUENTIALLY_SOFT_OS_REBOOTS:
+        if self.__soft_os_reboot_count >= self.__MAXIMUM_SEQUENTIALLY_SOFT_OS_REBOOTS:
             self.__logger.info(f"MAXIMUM_OS_REBOOT_REACHED on {self}")
             return ErrorCodes.MAXIMUM_OS_REBOOT_REACHED
 
