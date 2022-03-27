@@ -1,8 +1,10 @@
+import errno
 import logging
 import os
 import socket
 import telnetlib
 import threading
+import time
 
 import yaml
 
@@ -27,9 +29,9 @@ class Machine(threading.Thread):
     # Num of start app tries
     __MAX_TELNET_TRIES = 4
     # Max attempts to reboot the device
-    __MAX_ATTEMPTS_TO_HARD_REBOOT = 6
-    __MAXIMUM_SEQUENTIALLY_SOFT_APP_REBOOTS = 5
-    __MAXIMUM_SEQUENTIALLY_SOFT_OS_REBOOTS = 3
+    __MAX_SEQUENTIALLY_HARD_REBOOTS = 6
+    __MAX_SEQUENTIALLY_SOFT_APP_REBOOTS = 3
+    __MAX_SEQUENTIALLY_SOFT_OS_REBOOTS = 3
 
     # Time in seconds between the POWER switch OFF and ON
     __POWER_SWITCH_DEFAULT_TIME_REST = 2
@@ -151,6 +153,24 @@ class Machine(threading.Thread):
         tn.read_until(b'$ ', timeout=self.__max_timeout_time)
         return tn
 
+    def __wait_for_booting(self):
+        boot_waiting_upper_threshold = self.__boot_waiting_time * 2
+        current_timestamp = start_timestamp = time.time()
+        while (current_timestamp - start_timestamp) <= boot_waiting_upper_threshold:
+            current_timestamp = time.time()
+            try:
+                with self.__telnet_login():
+                    return ErrorCodes.SUCCESS
+            except OSError as e:
+                if e.errno == errno.EHOSTUNREACH:
+                    self.__logger.error(f"Host unreachable {self} ")
+                    return ErrorCodes.HOST_UNREACHABLE
+            except EOFError:
+                self.__stop_event.wait(1)
+                continue
+
+        return ErrorCodes.TELNET_CONNECTION_ERROR
+
     def __soft_app_reboot(self, previous_log_end_status: EndStatus = None) -> ErrorCodes:
         """ kill and start an app on the device
         :previous_log_end_status if it is not the first time that the device will run an app,
@@ -162,7 +182,7 @@ class Machine(threading.Thread):
                 f"INCORRECT CONFIGURATION: previous_ending_status is None and __dut_logging_obj is Not None - {self}")
             raise
 
-        if self.__soft_app_reboot_count >= self.__MAXIMUM_SEQUENTIALLY_SOFT_APP_REBOOTS:
+        if self.__soft_app_reboot_count >= self.__MAX_SEQUENTIALLY_SOFT_APP_REBOOTS:
             self.__logger.info(f"MAXIMUM_APP_REBOOT_REACHED on {self}")
             return ErrorCodes.MAXIMUM_APP_REBOOT_REACHED
 
@@ -187,23 +207,24 @@ class Machine(threading.Thread):
                     # Never sleep with time, but with event wait
                     self.__stop_event.wait(self.__READ_EAGER_TIMEOUT)
                     # If it reaches here the app is running
-                    self.__logger.info(
-                        f"SUCCESSFUL KILL:{cmd_kill} and CMD:{cmd_line_run} "
-                        f"COUNTER{self.__soft_app_reboot_count} TRY:{try_i} on {self}")
+                    self.__logger.info(f"SUCCESSFUL SOFT REBOOT CMDS: {cmd_kill} and {cmd_line_run} "
+                                       f"COUNTER{self.__soft_app_reboot_count} TRY:{try_i} on {self}")
                     # Close the DUTLogging only if there is a log file open
                     if self.__dut_logging_obj:
                         self.__dut_logging_obj.finish_this_dut_log(end_status=previous_log_end_status)
-                        # Delete the current dut logging obj
-                        del self.__dut_logging_obj
+                    # Delete the current dut logging obj
+                    del self.__dut_logging_obj
                     self.__dut_logging_obj = DUTLogging(log_dir=self.__dut_log_path, test_name=test_name,
                                                         test_header=header, hostname=self.__dut_hostname,
                                                         logger_name=self.__logger_name)
                 self.__soft_app_reboot_count += 1
                 return ErrorCodes.SUCCESS
-            except (OSError, EOFError):
-                self.__logger.error(f"Host unreachable, waiting for a connection from {self}, trying telnet again")
-
-            self.__logger.info(f"Command execution not successful TRY:{try_i} on {self}")
+            except OSError as e:
+                if e.errno == errno.EHOSTUNREACH:
+                    self.__logger.error(f"Host unreachable {self} ")
+                    return ErrorCodes.HOST_UNREACHABLE
+            except EOFError:
+                self.__logger.info(f"Command execution not successful TRY:{try_i} on {self}")
         return ErrorCodes.TELNET_CONNECTION_ERROR
 
     def __soft_os_reboot(self):
@@ -213,7 +234,7 @@ class Machine(threading.Thread):
         if self.__disable_os_soft_reboot is True:
             return ErrorCodes.DISABLED_SOFT_OS_REBOOT
 
-        if self.__soft_os_reboot_count >= self.__MAXIMUM_SEQUENTIALLY_SOFT_OS_REBOOTS:
+        if self.__soft_os_reboot_count >= self.__MAX_SEQUENTIALLY_SOFT_OS_REBOOTS:
             self.__logger.info(f"MAXIMUM_OS_REBOOT_REACHED on {self}")
             return ErrorCodes.MAXIMUM_OS_REBOOT_REACHED
 
@@ -231,14 +252,16 @@ class Machine(threading.Thread):
                 self.__logger.info(f"SUCCESSFUL OS REBOOT:{default_os_reboot_cmd} "
                                    f"COUNTER:{self.__soft_os_reboot_count} TRY:{try_i} on {self}")
                 # Wait the machine to boot
-                self.__stop_event.wait(self.__boot_waiting_time)
-
+                boot_error_code = self.__wait_for_booting()
+                if boot_error_code != ErrorCodes.SUCCESS:
+                    return boot_error_code
                 # Reset the soft app reboot as the system will be rebooted
                 self.__soft_app_reboot_count = 0
                 self.__soft_os_reboot_count += 1
                 return self.__soft_app_reboot(previous_log_end_status=EndStatus.SOFT_OS_REBOOT)
+
             except (OSError, EOFError):
-                self.__logger.error(f"Host unreachable, waiting for a connection from {self}, trying telnet again")
+                self.__logger.error(f"Soft OS reboot not successful, trying again: {self}")
 
         return ErrorCodes.TELNET_CONNECTION_ERROR
 
@@ -247,7 +270,7 @@ class Machine(threading.Thread):
         :return reboot_status
         """
         reboot_sleep_time = self.__POWER_SWITCH_DEFAULT_TIME_REST
-        if self.__hard_reboot_count > self.__MAX_ATTEMPTS_TO_HARD_REBOOT:
+        if self.__hard_reboot_count > self.__MAX_SEQUENTIALLY_HARD_REBOOTS:
             # We turn off the device for __LONG_REBOOT_WAIT_TIME_AFTER_PROBLEM seconds
             reboot_sleep_time = self.__LONG_REBOOT_WAIT_TIME_AFTER_PROBLEM
             self.__hard_reboot_count = 0
@@ -269,7 +292,7 @@ class Machine(threading.Thread):
         else:
             self.__logger.info(reboot_msg + " finished.")
         # Wait the machine to boot
-        self.__stop_event.wait(self.__boot_waiting_time)
+        self.__wait_for_booting()
         # Reset the soft app and the soft os reboot as the system will be hard rebooted
         self.__soft_app_reboot_count = 0
         self.__soft_os_reboot_count = 0
