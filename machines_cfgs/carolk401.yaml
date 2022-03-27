@@ -1,7 +1,7 @@
 # Configuration example for carolk401 device
 
 # the IP address of the machine
-ip: 192.168.1.10
+ip:  192.168.195.6
 
 # Port that the device will send data
 receive_port: 1024
@@ -31,6 +31,9 @@ boot_waiting_time: !!int 60
 # connection timeout
 # This is the maximum time interval between the messages received
 max_timeout_time: !!int 10
+
+# Disable the option for OS soft reboot before trying to hard reboot
+disable_os_soft_reboot: !!bool True
 
 # Json files that contains the commands
 json_files: [
