@@ -224,7 +224,7 @@ class Machine(threading.Thread):
             except OSError as e:
                 if e.errno == errno.EHOSTUNREACH:
                     self.__logger.error(f"Boot host unreachable {self} ")
-                    return ErrorCodes.HOST_UNREACHABLE
+                    # return ErrorCodes.HOST_UNREACHABLE
             except EOFError:
                 continue
 
