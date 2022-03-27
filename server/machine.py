@@ -176,6 +176,7 @@ class Machine(threading.Thread):
         # The commands are already encoded
         cmd_line_run, cmd_kill, test_name, header = self.__command_factory.get_commands_and_test_info()
         # try __MAX_START_APP_TRIES times to start the app on the DUT
+        last_error_type = ErrorCodes.TELNET_CONNECTION_ERROR
         for try_i in range(self.__MAX_TELNET_TRIES):
             try:
                 with self.__telnet_login() as tn:
@@ -205,10 +206,10 @@ class Machine(threading.Thread):
             except OSError as e:
                 if e.errno == errno.EHOSTUNREACH:
                     self.__logger.error(f"Host unreachable {self} ")
-                    return ErrorCodes.HOST_UNREACHABLE
+                    last_error_type = ErrorCodes.HOST_UNREACHABLE
             except EOFError:
                 self.__logger.info(f"Command execution not successful TRY:{try_i} on {self}")
-        return ErrorCodes.TELNET_CONNECTION_ERROR
+        return last_error_type
 
     def __wait_for_booting(self):
         boot_waiting_upper_threshold = self.__boot_waiting_time * 1.3
