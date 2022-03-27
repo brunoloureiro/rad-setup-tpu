@@ -28,7 +28,7 @@ class Machine(threading.Thread):
     __MAX_TELNET_TRIES = 4
     # Max attempts to reboot the device
     __MAX_ATTEMPTS_TO_HARD_REBOOT = 6
-    __MAXIMUM_SEQUENTIALLY_SOFT_APP_REBOOTS = 10
+    __MAXIMUM_SEQUENTIALLY_SOFT_APP_REBOOTS = 5
     __MAXIMUM_SEQUENTIALLY_SOFT_OS_REBOOTS = 3
 
     # Time in seconds between the POWER switch OFF and ON
@@ -116,7 +116,7 @@ class Machine(threading.Thread):
                 # TO AVOID making sequentially reboot when receiving good data
                 # THis is necessary to fix the behavior when a device keeps crashing for multiple times
                 # in a short period, but eventually comes to life again
-                connection_type_str = "HEADER/BEGIN/END"
+                connection_type_str = "HEADER|BEGIN|END|INF"
                 if "#IT" in data.decode("ascii"):
                     connection_type_str = "ITERATION"
                     self.__soft_app_reboot_count = 0
