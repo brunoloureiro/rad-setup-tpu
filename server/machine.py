@@ -134,11 +134,12 @@ class Machine(threading.Thread):
                 if soft_app_reboot_status == ErrorCodes.SUCCESS:
                     continue
                 # Soft OS reboot
-                soft_os_reboot_status = self.__soft_os_reboot()
-                if soft_os_reboot_status == ErrorCodes.SUCCESS:
+                if self.__soft_os_reboot() == ErrorCodes.SUCCESS:
+                    self.__soft_app_reboot(previous_log_end_status=EndStatus.SOFT_OS_REBOOT)
                     continue
                 # Finally, the Power cycle Hard reboot
                 self.__hard_reboot()
+                self.__soft_app_reboot(previous_log_end_status=EndStatus.HARD_REBOOT)
 
     def __telnet_login(self) -> telnetlib.Telnet:
         """ Return a telnet session
@@ -152,24 +153,6 @@ class Machine(threading.Thread):
         tn.write(self.__dut_password.encode('ascii') + b'\n')
         tn.read_until(b'$ ', timeout=self.__max_timeout_time)
         return tn
-
-    def __wait_for_booting(self):
-        boot_waiting_upper_threshold = self.__boot_waiting_time * 2
-        current_timestamp = start_timestamp = time.time()
-        while (current_timestamp - start_timestamp) <= boot_waiting_upper_threshold:
-            self.__stop_event.wait(1)
-            current_timestamp = time.time()
-            try:
-                with self.__telnet_login():
-                    return ErrorCodes.SUCCESS
-            except OSError as e:
-                if e.errno == errno.EHOSTUNREACH:
-                    self.__logger.error(f"Boot host unreachable {self} ")
-                    return ErrorCodes.HOST_UNREACHABLE
-            except EOFError:
-                continue
-
-        return ErrorCodes.TELNET_CONNECTION_ERROR
 
     def __soft_app_reboot(self, previous_log_end_status: EndStatus = None) -> ErrorCodes:
         """ kill and start an app on the device
@@ -227,6 +210,24 @@ class Machine(threading.Thread):
                 self.__logger.info(f"Command execution not successful TRY:{try_i} on {self}")
         return ErrorCodes.TELNET_CONNECTION_ERROR
 
+    def __wait_for_booting(self):
+        boot_waiting_upper_threshold = self.__boot_waiting_time * 1.3
+        current_timestamp = start_timestamp = time.time()
+        while (current_timestamp - start_timestamp) <= boot_waiting_upper_threshold:
+            self.__stop_event.wait(1)
+            current_timestamp = time.time()
+            try:
+                with self.__telnet_login():
+                    return ErrorCodes.SUCCESS
+            except OSError as e:
+                if e.errno == errno.EHOSTUNREACH:
+                    self.__logger.error(f"Boot host unreachable {self} ")
+                    return ErrorCodes.HOST_UNREACHABLE
+            except EOFError:
+                continue
+
+        return ErrorCodes.TELNET_CONNECTION_ERROR
+
     def __soft_os_reboot(self):
         """ SOFT OS REBOOT: Reboot the operating system, or try to reboot using telnet
             THE KILL APP WILL MAKE THE LOGGING ENDING BASED ON THE EndStatus
@@ -240,27 +241,27 @@ class Machine(threading.Thread):
 
         self.__logger.info(f"Trying to perform a soft Operating System reboot (OS reboot and run app) on {self}")
         default_os_reboot_cmd = b"sudo /sbin/reboot\r\n"
-        for try_i in range(self.__MAX_TELNET_TRIES):
-            try:
-                with self.__telnet_login() as tn:
-                    # OS reboot
-                    tn.write(default_os_reboot_cmd)
-                    tn.read_very_eager()
-                    # Never sleep with time, but with event wait
-                    self.__stop_event.wait(self.__READ_EAGER_TIMEOUT)
-                # If it reaches here the app is running
-                self.__logger.info(f"SUCCESSFUL OS REBOOT:{default_os_reboot_cmd} "
-                                   f"COUNTER:{self.__soft_os_reboot_count} TRY:{try_i} on {self}")
-                # Wait the machine to boot
-                self.__wait_for_booting()
-                # Reset the soft app reboot as the system will be rebooted
-                self.__soft_app_reboot_count = 0
-                self.__soft_os_reboot_count += 1
-                return self.__soft_app_reboot(previous_log_end_status=EndStatus.SOFT_OS_REBOOT)
-            except (OSError, EOFError):
-                self.__logger.error(f"Soft OS reboot not successful, trying again: {self}")
-
-        return ErrorCodes.TELNET_CONNECTION_ERROR
+        # for try_i in range(self.__MAX_TELNET_TRIES):
+        try:
+            with self.__telnet_login() as tn:
+                # OS reboot
+                tn.write(default_os_reboot_cmd)
+                tn.read_very_eager()
+                # Never sleep with time, but with event wait
+                self.__stop_event.wait(self.__READ_EAGER_TIMEOUT)
+            # If it reaches here the app is running
+            self.__logger.info(f"SUCCESSFUL OS REBOOT:{default_os_reboot_cmd} "
+                               f"COUNTER:{self.__soft_os_reboot_count} on {self}")
+            # Wait the machine to boot
+            self.__wait_for_booting()
+            # Reset the soft app reboot as the system will be rebooted
+            self.__soft_app_reboot_count = 0
+            self.__soft_os_reboot_count += 1
+            # return self.__soft_app_reboot(previous_log_end_status=EndStatus.SOFT_OS_REBOOT)
+            return ErrorCodes.SUCCESS
+        except (OSError, EOFError):
+            self.__logger.error(f"Soft OS reboot not successful {self}")
+            return ErrorCodes.TELNET_CONNECTION_ERROR
 
     def __hard_reboot(self):
         """ reboot the device based on reboot_machine module
@@ -293,7 +294,6 @@ class Machine(threading.Thread):
         # Reset the soft app and the soft os reboot as the system will be hard rebooted
         self.__soft_app_reboot_count = 0
         self.__soft_os_reboot_count = 0
-        return self.__soft_app_reboot(previous_log_end_status=EndStatus.HARD_REBOOT)
 
     def stop(self) -> None:
         """ Stop the main function before join the thread """
