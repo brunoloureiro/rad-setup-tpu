@@ -252,14 +252,11 @@ class Machine(threading.Thread):
                 self.__logger.info(f"SUCCESSFUL OS REBOOT:{default_os_reboot_cmd} "
                                    f"COUNTER:{self.__soft_os_reboot_count} TRY:{try_i} on {self}")
                 # Wait the machine to boot
-                boot_error_code = self.__wait_for_booting()
-                if boot_error_code != ErrorCodes.SUCCESS:
-                    return boot_error_code
+                self.__wait_for_booting()
                 # Reset the soft app reboot as the system will be rebooted
                 self.__soft_app_reboot_count = 0
                 self.__soft_os_reboot_count += 1
                 return self.__soft_app_reboot(previous_log_end_status=EndStatus.SOFT_OS_REBOOT)
-
             except (OSError, EOFError):
                 self.__logger.error(f"Soft OS reboot not successful, trying again: {self}")
 
