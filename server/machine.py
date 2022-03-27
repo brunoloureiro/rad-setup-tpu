@@ -113,7 +113,15 @@ class Machine(threading.Thread):
                 data, address = self.__messages_socket.recvfrom(self.__DATA_SIZE)
                 self.__dut_logging_obj(message=data)
                 self.__hard_reboot_count = 0
-                self.__logger.debug(f"Connection from {self}")
+                # TO AVOID making sequentially reboot when receiving good data
+                # THis is necessary to fix the behavior when a device keeps crashing for multiple times
+                # in a short period, but eventually comes to life again
+                connection_type_str = "HEADER/BEGIN/END"
+                if "#IT" in data.decode("ascii"):
+                    connection_type_str = "ITERATION"
+                    self.__soft_app_reboot_count = 0
+                self.__logger.debug(f"{connection_type_str} - Connection from {self}")
+
                 if self.__command_factory.is_command_window_timed_out:
                     self.__logger.info(
                         f"Benchmark exceeded the command execution window, executing another one now on {self}.")
