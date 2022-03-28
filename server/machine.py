@@ -120,7 +120,6 @@ class Machine(threading.Thread):
             try:
                 data, address = self.__messages_socket.recvfrom(self.__DATA_SIZE)
                 self.__dut_logging_obj(message=data)
-                self.__hard_reboot_count = 0
                 # TO AVOID making sequentially reboot when receiving good data
                 # THis is necessary to fix the behavior when a device keeps crashing for multiple times
                 # in a short period, but eventually comes to life again
