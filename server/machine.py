@@ -11,7 +11,7 @@ import yaml
 from .command_factory import CommandFactory
 from .dut_logging import DUTLogging, EndStatus
 from .error_codes import ErrorCodes
-from .reboot_machine import reboot_machine, turn_machine_on
+from .reboot_machine import reboot_machine
 
 
 class Machine(threading.Thread):
@@ -100,15 +100,21 @@ class Machine(threading.Thread):
     def run(self):
         # Run execution of thread
         # mandatory: It must start the machine on
-        turn_on_status = turn_machine_on(address=self.__dut_ip, switch_model=self.__switch_model,
-                                         switch_port=self.__switch_port, switch_ip=self.__switch_ip,
-                                         logger_name=self.__logger_name)
-        if turn_on_status != ErrorCodes.SUCCESS:
+        # turn_on_status = turn_machine_on(address=self.__dut_ip, switch_model=self.__switch_model,
+        #                                  switch_port=self.__switch_port, switch_ip=self.__switch_ip,
+        #                                  logger_name=self.__logger_name)
+        _, on_status = reboot_machine(address=self.__dut_ip,
+                                      switch_model=self.__switch_model,
+                                      switch_port=self.__switch_port,
+                                      switch_ip=self.__switch_ip,
+                                      rebooting_sleep=self.__POWER_SWITCH_DEFAULT_TIME_REST,
+                                      logger_name=self.__logger_name,
+                                      thread_event=self.__stop_event)
+        if on_status != ErrorCodes.SUCCESS:
             self.__logger.error(f"Failed to turn ON the {self}")
 
-        # This will control the power cycle number
-
-        # Start the app for the first time
+        # Wait and start the app for the first time
+        self.__wait_for_booting()
         self.__soft_app_reboot()
         while self.__stop_event.is_set() is False:
             try:
@@ -192,8 +198,8 @@ class Machine(threading.Thread):
                     # Never sleep with time, but with event wait
                     self.__stop_event.wait(self.__READ_EAGER_TIMEOUT)
                     # If it reaches here the app is running
-                    self.__logger.info(f"SUCCESSFUL SOFT REBOOT CMDS: {cmd_kill} and {cmd_line_run} "
-                                       f"COUNTER{self.__soft_app_reboot_count} TRY:{try_i} on {self}")
+                    self.__logger.info(f"SUCCESSFUL SOFT REBOOT CMDS: {cmd_kill} COUNTER{self.__soft_app_reboot_count} "
+                                       f"TRY:{try_i} on {self}")
                     # Close the DUTLogging only if there is a log file open
                     if self.__dut_logging_obj:
                         self.__dut_logging_obj.finish_this_dut_log(end_status=previous_log_end_status)
