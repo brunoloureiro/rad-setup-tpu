@@ -279,6 +279,8 @@ class Machine(threading.Thread):
             # We turn off the device for __LONG_REBOOT_WAIT_TIME_AFTER_PROBLEM seconds
             reboot_sleep_time = self.__LONG_REBOOT_WAIT_TIME_AFTER_PROBLEM
             self.__hard_reboot_count = 0
+        else:
+            self.__hard_reboot_count += 1
 
         self.__logger.info(
             f"Trying to perform a hard reboot on device (power cycle). Sleep interval is {reboot_sleep_time} on {self}")
