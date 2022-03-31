@@ -125,7 +125,11 @@ class Machine(threading.Thread):
                 # in a short period, but eventually comes to life again
                 connection_type_str = "HEADER|BEGIN|END|INF"
                 if any([data_info in data.decode("ascii") for data_info in ["#IT", "#ERR"]]):
-                    connection_type_str = "ITERATION|ERR"
+                    if "#IT" in data.decode("ascii"):
+                        connection_type_str = "ITERATION"
+                    else:
+                        connection_type_str = "ERR"
+
                     self.__soft_app_reboot_count = 0
                 self.__logger.debug(f"{connection_type_str} - Connection from {self}")
 
