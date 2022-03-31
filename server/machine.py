@@ -123,13 +123,9 @@ class Machine(threading.Thread):
                 # TO AVOID making sequentially reboot when receiving good data
                 # THis is necessary to fix the behavior when a device keeps crashing for multiple times
                 # in a short period, but eventually comes to life again
-                connection_type_str = "HEADER|BEGIN|END|INF"
-                if any([data_info in data.decode("ascii") for data_info in ["#IT", "#ERR"]]):
-                    if "#IT" in data.decode("ascii"):
-                        connection_type_str = "ITERATION"
-                    else:
-                        connection_type_str = "ERR"
-
+                connection_type_str = "HEADER|BEGIN|END|INF|ERR"
+                if "#IT" in data.decode("ascii"):
+                    connection_type_str = "ITERATION"
                     self.__soft_app_reboot_count = 0
                 self.__logger.debug(f"{connection_type_str} - Connection from {self}")
 
