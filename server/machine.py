@@ -2,6 +2,7 @@ import errno
 import logging
 import os
 import socket
+import subprocess
 import telnetlib
 import threading
 import time
@@ -36,6 +37,8 @@ class Machine(threading.Thread):
     # Time in seconds between the POWER switch OFF and ON
     __POWER_SWITCH_DEFAULT_TIME_REST = 2
     __READ_EAGER_TIMEOUT = 1
+    __BOOT_PING_TIMEOUT = 2
+    __WAIT_AFTER_SOFT_OS_REBOOT_TIME = 5
 
     def __init__(self, configuration_file: str, server_ip: str, logger_name: str, server_log_path: str, *args,
                  **kwargs):
@@ -99,17 +102,10 @@ class Machine(threading.Thread):
 
     def run(self):
         # Run execution of thread
-        # mandatory: It must start the machine on
+        # mandatory: It must start the machine on (do not change to reboot, ON is the correct config)
         turn_on_status = turn_machine_on(address=self.__dut_ip, switch_model=self.__switch_model,
                                          switch_port=self.__switch_port, switch_ip=self.__switch_ip,
                                          logger_name=self.__logger_name)
-        # _, on_status = reboot_machine(address=self.__dut_ip,
-        #                               switch_model=self.__switch_model,
-        #                               switch_port=self.__switch_port,
-        #                               switch_ip=self.__switch_ip,
-        #                               rebooting_sleep=self.__POWER_SWITCH_DEFAULT_TIME_REST,
-        #                               logger_name=self.__logger_name,
-        #                               thread_event=self.__stop_event)
         if turn_on_status != ErrorCodes.SUCCESS:
             self.__logger.error(f"Failed to turn ON the {self}")
 
@@ -221,19 +217,25 @@ class Machine(threading.Thread):
         boot_waiting_upper_threshold = self.__boot_waiting_time * 1.3
         current_timestamp = start_timestamp = time.time()
         while (current_timestamp - start_timestamp) <= boot_waiting_upper_threshold:
-            self.__stop_event.wait(1)
-            current_timestamp = time.time()
+            # Pinging the board
             try:
-                with self.__telnet_login():
-                    return ErrorCodes.SUCCESS
-            except OSError as e:
-                if e.errno == errno.EHOSTUNREACH:
-                    self.__logger.error(f"Boot host unreachable {self} ")
-                    # return ErrorCodes.HOST_UNREACHABLE
-            except EOFError:
-                continue
-
-        return ErrorCodes.TELNET_CONNECTION_ERROR
+                subprocess.check_output(["ping", "-c", "1", self.__dut_ip], timeout=self.__BOOT_PING_TIMEOUT)
+                self.__logger.info(f"Boot ping successful, returning {self}")
+                return ErrorCodes.SUCCESS
+            except subprocess.TimeoutExpired:
+                self.__logger.error(f"Boot ping failed {self}")
+            # self.__stop_event.wait(1)
+            # current_timestamp = time.time()
+            # try:
+            #     with self.__telnet_login():
+            #         return ErrorCodes.SUCCESS
+            # except OSError as e:
+            #     if e.errno == errno.EHOSTUNREACH:
+            #         self.__logger.error(f"Boot host unreachable {self} ")
+            #         # return ErrorCodes.HOST_UNREACHABLE
+            # except EOFError:
+            #     continue
+        return ErrorCodes.HOST_UNREACHABLE
 
     def __soft_os_reboot(self):
         """ SOFT OS REBOOT: Reboot the operating system, or try to reboot using telnet
@@ -259,6 +261,8 @@ class Machine(threading.Thread):
             # If it reaches here the app is running
             self.__logger.info(f"SUCCESSFUL OS REBOOT:{default_os_reboot_cmd} "
                                f"COUNTER:{self.__soft_os_reboot_count} on {self}")
+            # must wait after soft reboot
+            self.__stop_event.wait(self.__WAIT_AFTER_SOFT_OS_REBOOT_TIME)
             # Wait the machine to boot
             self.__wait_for_booting()
             # Reset the soft app reboot as the system will be rebooted
