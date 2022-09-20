@@ -1,10 +1,9 @@
 import unittest
-import os
-import time
 
 from server.logger_formatter import logging_setup
 from server.reboot_machine import reboot_machine, turn_machine_on
 from server.error_codes import ErrorCodes
+
 
 class RebootMachineTestCase(unittest.TestCase):
     def test_reboot_machine(self):
