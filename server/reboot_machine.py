@@ -11,6 +11,7 @@ import subprocess
 import threading
 import time
 import typing
+import re
 
 import requests
 
@@ -25,19 +26,6 @@ try:
     subprocess.call(["curl", "--help"], stdout=subprocess.PIPE)
 except OSError:
     raise OSError("CURL is not available, please install curl before using this module")
-
-
-def _execute_command(cmd: str) -> ErrorCodes:
-    """ Simple function to execute a shell command
-    :param cmd: command string
-    :return: ErrorCodes enum
-    """
-    tmp_file = "/tmp/server_error_execute_command"
-    result = os.system(f"{cmd} 2>{tmp_file}")
-    with open(tmp_file) as err:
-        if len(err.readlines()) != 0 or result != 0:
-            return ErrorCodes.GENERAL_ERROR
-    return ErrorCodes.SUCCESS
 
 
 def _lindy_switch(status: str, switch_port: int, switch_ip: str, logger: logging.Logger) -> ErrorCodes:
@@ -111,7 +99,18 @@ def _common_switch_command(status: str, switch_ip: str, switch_port: int) -> Err
     cmd += port_default_cmd % ("On" if status == __ON else "Off")
     cmd += '&Apply=Apply\" '
     cmd += f'http://{switch_ip}/tgi/iocontrol.tgi -o /dev/null '
-    return _execute_command(cmd)
+    # Execute the command
+    tmp_file = "/tmp/server_error_execute_command"
+    result = os.system(f"{cmd} 2>{tmp_file}")
+    with open(tmp_file) as err:
+        success_line = False
+        for line in err:
+            m = re.match(r"\d+ {2}\d+ {4}\d+ {2}\d+ {2}\d+ {4}\d+ {2}\d+ {4}\d+ --:--:-- --:--:-- --:--:-- \d+", line)
+            if m:
+                success_line = True
+        if success_line is False or result != 0:
+            return ErrorCodes.GENERAL_ERROR
+    return ErrorCodes.SUCCESS
 
 
 def _select_command_on_switch(status: str, switch_model: str, switch_port: int, switch_ip: str,

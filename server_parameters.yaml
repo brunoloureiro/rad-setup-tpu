@@ -15,10 +15,15 @@ server_log_store_dir: logs/
 # enabled True if the server must use this machine, False otherwise
 machines: [
   {
-    "enabled": True, "cfg_file": "machines_cfgs/carolk401.yaml"
+    "enabled": True, "cfg_file": "machines_cfgs/carola20001.yaml"
   },
   {
-    "enabled": False, "cfg_file": "machines_cfgs/xeon.yaml"
+    "enabled": False, "cfg_file": "machines_cfgs/carolp20001.yaml"
   },
-
+  {
+    "enabled": False, "cfg_file": "machines_cfgs/carolm20001.yaml"
+  },
+  {
+    "enabled": False, "cfg_file": "machines_cfgs/raspberryjoseph1.yaml"
+  },
 ]
