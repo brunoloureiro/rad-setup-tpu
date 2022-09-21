@@ -220,12 +220,15 @@ class Machine(threading.Thread):
             # Pinging the board
             try:
                 subprocess.check_output(["ping", "-c", "1", self.__dut_ip], timeout=self.__BOOT_PING_TIMEOUT)
-                self.__logger.info(f"Boot ping successful, returning {self}")
-                return ErrorCodes.SUCCESS
-            except subprocess.TimeoutExpired:
-                self.__logger.error(f"Boot ping failed {self}")
+                # Try to see if the telnet login is indeed possible
+                with self.__telnet_login():
+                    self.__logger.info(f"Boot ping successful {self}")
+                    return ErrorCodes.SUCCESS
+                # return ErrorCodes.SUCCESS
+            except (subprocess.TimeoutExpired, OSError, EOFError, subprocess.CalledProcessError) as e:
+                self.__logger.error(f"Boot ping failed {self} error:{e}")
+            current_timestamp = time.time()
             # self.__stop_event.wait(1)
-            # current_timestamp = time.time()
             # try:
             #     with self.__telnet_login():
             #         return ErrorCodes.SUCCESS
