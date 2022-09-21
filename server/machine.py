@@ -26,7 +26,7 @@ class Machine(threading.Thread):
     # Wait time to see if the board returns, 1800 = half an hour
     __LONG_REBOOT_WAIT_TIME_AFTER_PROBLEM = 1800
     # Data receive size in bytes
-    __DATA_SIZE = 1024
+    __DATA_SIZE = 4096
     # Num of start app tries
     __MAX_TELNET_TRIES = 4
     # Max attempts to reboot the device

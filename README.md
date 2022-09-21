@@ -17,8 +17,10 @@ The server and the client have different requirements, listed as follows.
 
 The server is a set of modules written in Python. The following packages and tools are necessary to run the server:
 
-- Python >=3.8
-- PyYAML >=6.0
+- Python 3.8 or newer
+- PyYAML
+- Requests
+- Curl
 
 ### Client
 
