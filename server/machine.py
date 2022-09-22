@@ -172,7 +172,7 @@ class Machine(threading.Thread):
             return ErrorCodes.MAXIMUM_APP_REBOOT_REACHED
 
         # First check if there is an app running
-        self.__logger.info(f"Soft app reboot (app kill and run again/start first time) on {self}")
+        self.__logger.info(f"TRYING SOFT APP REBOOT (app kill and run again/start first time) on {self}")
 
         # self.__command_factory produces the commands that will be executed
         # The commands are already encoded
@@ -215,15 +215,17 @@ class Machine(threading.Thread):
 
     def __wait_for_booting(self):
         boot_waiting_upper_threshold = self.__boot_waiting_time * 1.3
-        current_timestamp = start_timestamp = time.time()
+        current_timestamp = time.time()
+        start_timestamp = current_timestamp
         while (current_timestamp - start_timestamp) <= boot_waiting_upper_threshold:
             # Pinging the board
             try:
                 subprocess.check_output(["ping", "-c", "1", self.__dut_ip], timeout=self.__BOOT_PING_TIMEOUT)
                 # Try to see if the telnet login is indeed possible
-                with self.__telnet_login():
-                    self.__logger.info(f"Boot ping successful {self}")
-                    return ErrorCodes.SUCCESS
+                tn = self.__telnet_login()
+                tn.close()
+                self.__logger.info(f"Boot ping successful {self}")
+                return ErrorCodes.SUCCESS
                 # return ErrorCodes.SUCCESS
             except (subprocess.TimeoutExpired, OSError, EOFError, subprocess.CalledProcessError) as e:
                 self.__logger.error(f"Boot ping failed {self} error:{e}")
@@ -302,7 +304,7 @@ class Machine(threading.Thread):
         reboot_msg += f"COUNTER:{self.__hard_reboot_count} SWITCH_IP:{self.__switch_ip}"
         if off_status != ErrorCodes.SUCCESS or on_status != ErrorCodes.SUCCESS:
             reboot_msg += f" failed. ON_STATUS:{on_status} OFF_STATUS:{off_status}"
-            self.__logger.exception(reboot_msg)
+            self.__logger.error(reboot_msg)
         else:
             self.__logger.info(reboot_msg + " finished.")
         # Wait the machine to boot
