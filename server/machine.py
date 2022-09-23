@@ -227,8 +227,10 @@ class Machine(threading.Thread):
                 self.__logger.info(f"Boot ping successful {self}")
                 return ErrorCodes.SUCCESS
                 # return ErrorCodes.SUCCESS
-            except (subprocess.TimeoutExpired, OSError, EOFError, subprocess.CalledProcessError) as e:
+            except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as e:
                 self.__logger.error(f"Boot ping failed {self} error:{e}")
+            except (OSError, EOFError) as e:
+                self.__logger.error(f"Telnet conn failed {self} error:{e}")
                 if e.errno == errno.ECONNREFUSED:
                     # When connection is refused it crashes instantaneously
                     self.__stop_event.wait(self.__BOOT_PING_TIMEOUT)
