@@ -229,9 +229,10 @@ class Machine(threading.Thread):
                 # return ErrorCodes.SUCCESS
             except (subprocess.TimeoutExpired, OSError, EOFError, subprocess.CalledProcessError) as e:
                 self.__logger.error(f"Boot ping failed {self} error:{e}")
-                if e == ConnectionRefusedError:
-                    # When connection is refused it crashes instantaneously
-                    self.__stop_event.wait(self.__BOOT_PING_TIMEOUT)
+            except ConnectionRefusedError as e:
+                self.__logger.error(f"Boot ping failed {self} error:{e}")
+                # When connection is refused it crashes instantaneously
+                self.__stop_event.wait(self.__BOOT_PING_TIMEOUT)
             current_timestamp = time.time()
             # self.__stop_event.wait(1)
             # try:
