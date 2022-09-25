@@ -193,7 +193,7 @@ class Machine(threading.Thread):
                     # Never sleep with time, but with event wait
                     self.__stop_event.wait(self.__READ_EAGER_TIMEOUT)
                     # If it reaches here the app is running
-                    self.__logger.info(f"SUCCESSFUL SOFT REBOOT CMDS: {cmd_kill} COUNTER{self.__soft_app_reboot_count} "
+                    self.__logger.info(f"SUCCESSFUL SOFT REBOOT CMDS:{cmd_kill} COUNTER:{self.__soft_app_reboot_count} "
                                        f"TRY:{try_i} on {self}")
                     # Close the DUTLogging only if there is a log file open
                     if self.__dut_logging_obj:
