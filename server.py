@@ -1,11 +1,27 @@
 #!/usr/bin/python3
 import argparse
+import logging
 import os
 
 import yaml
 
 from server.logger_formatter import logging_setup
 from server.machine import Machine
+
+
+def __machine_thread_exception_handler(args):
+    """
+    FIXME: Future feature this method can handle the exception on the Machine threads
+    The args argument has the following attributes:
+    exc_type: Exception type.
+    exc_value: Exception value, can be None.
+    exc_traceback: Exception traceback, can be None.
+    thread: Thread which raised the exception, can be None.
+    """
+    logger_name = os.path.basename(str(__file__).lower().replace(".py", ""))
+    logger = logging.getLogger(logger_name)
+
+    pass
 
 
 def main():
