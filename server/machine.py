@@ -6,6 +6,7 @@ import subprocess
 import telnetlib
 import threading
 import time
+from typing import Optional
 
 import yaml
 
@@ -40,8 +41,8 @@ class Machine(threading.Thread):
     __BOOT_PING_TIMEOUT = 2
     __WAIT_AFTER_SOFT_OS_REBOOT_TIME = 5
 
-    def __init__(self, configuration_file: str, server_ip: str, logger_name: str, server_log_path: str, *args,
-                 **kwargs):
+    def __init__(self, configuration_file: str, server_ip: str, logger_name: str, server_log_path: str,
+                 *args, **kwargs):
         """ Initialize a new thread that represents a setup machine
         :param configuration_file: YAML file that contains all information from that specific Device Under Test (DUT)
         :param server_ip: IP of the server
@@ -53,6 +54,7 @@ class Machine(threading.Thread):
         self.__logger_name = f"{logger_name}.{__name__}"
         self.__logger = logging.getLogger(self.__logger_name)
         self.__logger.info(f"Creating a new Machine thread for IP {server_ip}")
+        self.__stop_event = threading.Event()
 
         # load yaml file
         with open(configuration_file, 'r') as fp:
@@ -75,7 +77,6 @@ class Machine(threading.Thread):
         self.__command_factory = CommandFactory(json_files_list=machine_parameters["json_files"],
                                                 logger_name=logger_name)
 
-        self.__stop_event = threading.Event()
         self.__dut_log_path = f"{server_log_path}/{self.__dut_hostname}"
         # make sure that the path exists
         if os.path.isdir(self.__dut_log_path) is False:
@@ -180,6 +181,9 @@ class Machine(threading.Thread):
         # try __MAX_START_APP_TRIES times to start the app on the DUT
         last_error_type = ErrorCodes.TELNET_CONNECTION_ERROR
         for try_i in range(self.__MAX_TELNET_TRIES):
+            # All loops must stop after the event is set
+            if self.__stop_event.is_set():
+                break
             try:
                 with self.__telnet_login() as tn:
                     # Kill first
@@ -218,6 +222,9 @@ class Machine(threading.Thread):
         current_timestamp = time.time()
         start_timestamp = current_timestamp
         while (current_timestamp - start_timestamp) <= boot_waiting_upper_threshold:
+            # All loops must stop after the event is set
+            if self.__stop_event.is_set():
+                break
             # Pinging the board
             try:
                 subprocess.check_output(["ping", "-c", "1", self.__dut_ip], timeout=self.__BOOT_PING_TIMEOUT)
@@ -317,6 +324,17 @@ class Machine(threading.Thread):
         # Reset the soft app and the soft os reboot as the system will be hard rebooted
         self.__soft_app_reboot_count = 0
         self.__soft_os_reboot_count = 0
+
+    def join(self, timeout: Optional[float] = None) -> None:
+        self.__logger.info(f"Joining Machine {self}.")
+        try:
+            with self.__telnet_login() as tn:
+                # Kill first
+                tn.write(self.__command_factory.current_command_cmd_kill)
+                tn.read_very_eager()
+        except (OSError, EOFError):
+            self.__logger.error(f"Unsuccessful kill command after Machine thread joining on {self}")
+        super(Machine, self).join(timeout)
 
     def stop(self) -> None:
         """ Stop the main function before join the thread """

@@ -71,3 +71,10 @@ class CommandFactory:
         code_name = self.__current_command["codename"]
         code_header = self.__current_command["header"]
         return cmd_exec, cmd_kill, code_name, code_header
+
+    @property
+    def current_command_cmd_kill(self) -> bytes:
+        """ Get the current command kill command line
+        """
+        cmd_kill = self.__current_command["killcmd"].replace("nohup", "")
+        return f"{cmd_kill} \r\n".encode(encoding='ascii')

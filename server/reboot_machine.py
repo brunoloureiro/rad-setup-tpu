@@ -7,11 +7,11 @@ public functions are reboot_machine turn_machine_on.
 import json
 import logging
 import os
+import re
 import subprocess
 import threading
 import time
 import typing
-import re
 
 import requests
 
@@ -20,6 +20,9 @@ from .error_codes import ErrorCodes
 # Switches status, only used in this module
 __ON = "ON"
 __OFF = "OFF"
+
+# Make sure that everything here is thread safe
+__GLOBAL_LOCK = threading.Lock()
 
 # Check if curl is available
 try:
@@ -123,24 +126,25 @@ def _select_command_on_switch(status: str, switch_model: str, switch_port: int, 
     :param logger: logging.Logger obj
     :return: ErrorCodes enum, if the switch is not defined it will trow a ValueError exception
     """
-    if switch_model == "default":
-        return _common_switch_command(status, switch_ip, switch_port)
-    elif switch_model == "lindy":
-        return _lindy_switch(status, switch_port, switch_ip, logger)
-    else:
-        raise ValueError("Incorrect switch set to switch_model")
+    with __GLOBAL_LOCK:
+        if switch_model == "default":
+            return _common_switch_command(status, switch_ip, switch_port)
+        elif switch_model == "lindy":
+            return _lindy_switch(status, switch_port, switch_ip, logger)
+        else:
+            raise ValueError("Incorrect switch set to switch_model")
 
 
 def reboot_machine(address: str, switch_model: str, switch_port: int, switch_ip: str, rebooting_sleep: float,
                    logger_name: str, thread_event: threading.Event = None) -> typing.Tuple[ErrorCodes, ErrorCodes]:
     """Public function to reboot a machine
-    :param thread_event:
     :param address: Address of the machine that is being rebooted
     :param switch_model: model of the switch. Supported now default and lindy
     :param switch_port: port to reboot
     :param switch_ip: ip address for the switch
     :param rebooting_sleep: How many seconds the machine must be OFF before turn ON again
     :param logger_name: logger name defined in the main setup module
+    :param thread_event: thread event to sleep the thread when multiple machine are being used
     :return: a tuple containing the outcomes of the OFF and ON commands
     """
     logger = logging.getLogger(f"{logger_name}.{__name__}")
