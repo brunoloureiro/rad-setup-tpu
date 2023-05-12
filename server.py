@@ -20,6 +20,7 @@ MACHINE_LIST: list = list()
 
 
 def __end_daemon_machines():
+    # FIXME: This does not work when the end is before the threads are not started yet
     """ General end for all machines """
     logger = logging.getLogger(name=PARENT_LOGGER_NAME)
     logger.info("Stopping all threads")
@@ -37,6 +38,7 @@ def __machine_thread_exception_handler(args):
     exc_value: Exception value, can be None.
     exc_traceback: Exception traceback, can be None.
     thread: Thread which raised the exception, can be None. """
+    # FIXME: some exceptions are problematic as not all attributes are available
     logger = logging.getLogger(name=PARENT_LOGGER_NAME)
     exception_str = "".join(
         traceback.format_exception(etype=args.exc_type, value=args.exc_value, tb=args.exc_traceback)

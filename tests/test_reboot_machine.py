@@ -7,11 +7,13 @@ from server.error_codes import ErrorCodes
 
 class RebootMachineTestCase(unittest.TestCase):
     def test_reboot_machine(self):
+        import threading
         logger = logging_setup(logger_name="REBOOT_MACHINE_LOG", log_file="unit_test_log_RebootMachine.log")
         logger.debug("Debugging reboot machine")
 
-        reboot = reboot_machine(address="192.168.1.31", switch_model="default", switch_port=1,
-                                switch_ip="192.168.1.100", rebooting_sleep=10, logger_name="REBOOT_MACHINE_LOG")
+        reboot = reboot_machine(address="192.168.1.42", switch_model="lindy", switch_port=1,
+                                switch_ip="192.168.1.102", rebooting_sleep=10, logger_name="REBOOT_MACHINE_LOG",
+                                thread_event=threading.Event())
         logger.debug(f"Reboot status OFF={reboot[0]} ON={reboot[1]}")
 
         turn_machine_on(address="192.168.1.31", switch_model="default", switch_port=1, switch_ip="192.168.1.100",

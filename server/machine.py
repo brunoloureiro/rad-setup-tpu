@@ -36,7 +36,8 @@ class Machine(threading.Thread):
     __MAX_SEQUENTIALLY_SOFT_OS_REBOOTS = 3
 
     # Time in seconds between the POWER switch OFF and ON
-    __POWER_SWITCH_DEFAULT_TIME_REST = 2
+    # Smaller intervals are too dangerous ChipIR 12/2022
+    __POWER_SWITCH_DEFAULT_TIME_REST = 4
     __READ_EAGER_TIMEOUT = 1
     __BOOT_PING_TIMEOUT = 2
     __WAIT_AFTER_SOFT_OS_REBOOT_TIME = 5
@@ -120,10 +121,16 @@ class Machine(threading.Thread):
                 # TO AVOID making sequentially reboot when receiving good data
                 # THis is necessary to fix the behavior when a device keeps crashing for multiple times
                 # in a short period, but eventually comes to life again
-                connection_type_str = "HEADER|BEGIN|END|INF|ERR"
-                if "#IT" in data.decode("ascii"):
+                connection_type_str = "INF|ERR"
+                data_decoded = data.decode("ascii")
+                if "#IT" in data_decoded:
                     connection_type_str = "ITERATION"
                     self.__soft_app_reboot_count = 0
+                elif "#HEADER" in data_decoded:
+                    connection_type_str = "HEADER"
+                elif "#BEGIN" in data_decoded or "#END" in data_decoded:
+                    connection_type_str = "BEGIN|END"
+
                 self.__logger.debug(f"{connection_type_str} - Connection from {self}")
 
                 if self.__command_factory.is_command_window_timed_out:
@@ -327,13 +334,14 @@ class Machine(threading.Thread):
 
     def join(self, timeout: Optional[float] = None) -> None:
         self.__logger.info(f"Joining Machine {self}.")
-        try:
-            with self.__telnet_login() as tn:
-                # Kill first
-                tn.write(self.__command_factory.current_command_cmd_kill)
-                tn.read_very_eager()
-        except (OSError, EOFError):
-            self.__logger.error(f"Unsuccessful kill command after Machine thread joining on {self}")
+        # It is not interesting to try another connection at this point ChipIR 12/2022
+        # try:
+        #     with self.__telnet_login() as tn:
+        #         # Kill first
+        #         tn.write(self.__command_factory.current_command_cmd_kill)
+        #         tn.read_very_eager()
+        # except (OSError, EOFError):
+        #     self.__logger.error(f"Unsuccessful kill command after Machine thread joining on {self}")
         super(Machine, self).join(timeout)
 
     def stop(self) -> None:
