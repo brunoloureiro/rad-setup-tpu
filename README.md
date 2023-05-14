@@ -38,9 +38,9 @@ TODO
 TODO
 
 ### On server-side
--Configure server_parameters.yaml
--Configure/Create machines_cfgs/<machine name>.yaml
--Configure/Create machines_cfgs/<machine name>/<machine name>/<benchmark name>.json
+- Configure server_parameters.yaml
+- Configure/Create machines_cfgs/<machine name>.yaml
+- Configure/Create machines_cfgs/<machine name>/<machine name>/<benchmark name>.json
 # Contribute
 
 The Python modules development follows (or at least we try) the 
