@@ -163,7 +163,7 @@ def reboot_machine(address: str, switch_model: str, switch_port: int, switch_ip:
 
 def turn_machine_on(address: str, switch_model: str, switch_port: int, switch_ip: str, logger_name: str) -> ErrorCodes:
     """Public function to turn ON a machine
-    :param address: Address of the machine that is being rebooted
+    :param address: Address of the machine that is being turned ON
     :param switch_model: model of the switch. Supported now default and lindy
     :param switch_port: port to reboot
     :param switch_ip: ip address for the switch
@@ -173,4 +173,19 @@ def turn_machine_on(address: str, switch_model: str, switch_port: int, switch_ip
     logger = logging.getLogger(f"{logger_name}.{__name__}")
     logger.info(f"Turning ON machine:{address} switch_IP:{switch_ip} switch_port:{switch_port}")
     return _select_command_on_switch(status=__ON, switch_model=switch_model, switch_port=switch_port,
+                                     switch_ip=switch_ip, logger=logger)
+
+
+def turn_machine_off(address: str, switch_model: str, switch_port: int, switch_ip: str, logger_name: str) -> ErrorCodes:
+    """Public function to turn OFF a machine
+    :param address: Address of the machine that is being turned OFF
+    :param switch_model: model of the switch. Supported now default and lindy
+    :param switch_port: port to reboot
+    :param switch_ip: ip address for the switch
+    :param logger_name: logger name defined in the main setup module
+    :return: ErrorCodes status
+    """
+    logger = logging.getLogger(f"{logger_name}.{__name__}")
+    logger.info(f"Turning OFF machine:{address} switch_IP:{switch_ip} switch_port:{switch_port}")
+    return _select_command_on_switch(status=__OFF, switch_model=switch_model, switch_port=switch_port,
                                      switch_ip=switch_ip, logger=logger)
