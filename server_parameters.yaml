@@ -2,7 +2,7 @@
 # No more magic paths and numbers
 
 # IP of the remote socket server (hardware watchdog)
-server_ip: 192.168.1.5
+server_ip: 192.168.1.14
 
 # log in whatever path you are executing this script
 server_log_file: server.log
@@ -14,16 +14,12 @@ server_log_store_dir: logs/
 # the ones which enabled parameter is false are not checked
 # enabled True if the server must use this machine, False otherwise
 machines: [
+  # This machine will be checked
   {
-    "enabled": True, "cfg_file": "machines_cfgs/carola20001.yaml"
+    "enabled": True, "cfg_file": "machines_cfgs/carolk401.yaml"
   },
+  # This machine will not be checked
   {
-    "enabled": False, "cfg_file": "machines_cfgs/carolp20001.yaml"
-  },
-  {
-    "enabled": False, "cfg_file": "machines_cfgs/carolm20001.yaml"
-  },
-  {
-    "enabled": False, "cfg_file": "machines_cfgs/raspberryjoseph1.yaml"
+    "enabled": False, "cfg_file": "machines_cfgs/p20001.yaml"
   },
 ]

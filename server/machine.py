@@ -22,7 +22,7 @@ class Machine(threading.Thread):
     it basically controls the status of the device and monitor it.
     Do not change the machine constants unless you
     really know what you are doing, most of the constants
-    describes the behavior of HARD reboot execution
+    describe the behavior of HARD reboot execution
     """
     # Wait time to see if the board returns, 1800 = half an hour
     __LONG_REBOOT_WAIT_TIME_AFTER_PROBLEM = 1800
@@ -41,6 +41,9 @@ class Machine(threading.Thread):
     __READ_EAGER_TIMEOUT = 1
     __BOOT_PING_TIMEOUT = 2
     __WAIT_AFTER_SOFT_OS_REBOOT_TIME = 5
+
+    # Possible connection string
+    __ALL_POSSIBLE_CONNECTION_TYPES = ['#IT', '#HEADER', '#BEGIN', '#END', '#INF', '#ERR']  # Add more if necessary
 
     def __init__(self, configuration_file: str, server_ip: str, logger_name: str, server_log_path: str,
                  *args, **kwargs):
@@ -118,18 +121,18 @@ class Machine(threading.Thread):
             try:
                 data, address = self.__messages_socket.recvfrom(self.__DATA_SIZE)
                 self.__dut_logging_obj(message=data)
-                # TO AVOID making sequentially reboot when receiving good data
-                # THis is necessary to fix the behavior when a device keeps crashing for multiple times
-                # in a short period, but eventually comes to life again
-                connection_type_str = "INF|ERR"
                 data_decoded = data.decode("ascii")
-                if "#IT" in data_decoded:
-                    connection_type_str = "ITERATION"
+                connection_type_str = "UNKNOWN_CONNECTION_TYPE"
+                for substring in self.__ALL_POSSIBLE_CONNECTION_TYPES:
+                    if data_decoded.startswith(substring):
+                        connection_type_str = substring
+                        break
+
+                # TO AVOID making sequential reboot when receiving good data,
+                # This is necessary to fix the behavior when a device keeps crashing for multiple times
+                # in a short period, but eventually comes to life again
+                if connection_type_str == "#IT":
                     self.__soft_app_reboot_count = 0
-                elif "#HEADER" in data_decoded:
-                    connection_type_str = "HEADER"
-                elif "#BEGIN" in data_decoded or "#END" in data_decoded:
-                    connection_type_str = "BEGIN|END"
 
                 self.__logger.debug(f"{connection_type_str} - Connection from {self}")
 
@@ -166,7 +169,7 @@ class Machine(threading.Thread):
 
     def __soft_app_reboot(self, previous_log_end_status: EndStatus = None) -> ErrorCodes:
         """ kill and start an app on the device
-        :previous_log_end_status if it is not the first time that the device will run an app,
+        :previous_log_end_status: if it is not the first time that the device will run an app,
         then pass the end_status, otherwise leave it None
         :return: If the start was successful or not
         """
@@ -196,14 +199,14 @@ class Machine(threading.Thread):
                     # Kill first
                     tn.write(cmd_kill)
                     tn.read_very_eager()
-                    # Never sleep with time, but with event wait
+                    # Never sleep with time, but with event
                     self.__stop_event.wait(self.__READ_EAGER_TIMEOUT)
                     # Execute the command
                     tn.write(cmd_line_run)
                     tn.read_very_eager()
-                    # Never sleep with time, but with event wait
+                    # Never sleep with time, but with event
                     self.__stop_event.wait(self.__READ_EAGER_TIMEOUT)
-                    # If it reaches here the app is running
+                    # If it reaches here, the app is running
                     self.__logger.info(f"SUCCESSFUL SOFT REBOOT CMDS:{cmd_kill} COUNTER:{self.__soft_app_reboot_count} "
                                        f"TRY:{try_i} on {self}")
                     # Close the DUTLogging only if there is a log file open
@@ -225,10 +228,9 @@ class Machine(threading.Thread):
         return last_error_type
 
     def __wait_for_booting(self):
-        boot_waiting_upper_threshold = self.__boot_waiting_time * 1.3
         current_timestamp = time.time()
         start_timestamp = current_timestamp
-        while (current_timestamp - start_timestamp) <= boot_waiting_upper_threshold:
+        while (current_timestamp - start_timestamp) <= self.__boot_waiting_time:
             # All loops must stop after the event is set
             if self.__stop_event.is_set():
                 break
@@ -246,7 +248,7 @@ class Machine(threading.Thread):
             except (OSError, EOFError) as e:
                 self.__logger.error(f"Telnet conn failed {self} error:{e}")
                 if e.errno == errno.ECONNREFUSED:
-                    # When connection is refused it crashes instantaneously
+                    # When connection is refused, it crashes instantaneously
                     self.__stop_event.wait(self.__BOOT_PING_TIMEOUT)
             current_timestamp = time.time()
             # self.__stop_event.wait(1)
@@ -280,9 +282,8 @@ class Machine(threading.Thread):
                 # OS reboot
                 tn.write(default_os_reboot_cmd)
                 tn.read_very_eager()
-                # Never sleep with time, but with event wait
                 self.__stop_event.wait(self.__READ_EAGER_TIMEOUT)
-            # If it reaches here the app is running
+
             self.__logger.info(f"SUCCESSFUL OS REBOOT:{default_os_reboot_cmd} "
                                f"COUNTER:{self.__soft_os_reboot_count} on {self}")
             # must wait after soft reboot
@@ -334,14 +335,14 @@ class Machine(threading.Thread):
 
     def join(self, timeout: Optional[float] = None) -> None:
         self.__logger.info(f"Joining Machine {self}.")
-        # It is not interesting to try another connection at this point ChipIR 12/2022
-        # try:
-        #     with self.__telnet_login() as tn:
-        #         # Kill first
-        #         tn.write(self.__command_factory.current_command_cmd_kill)
-        #         tn.read_very_eager()
-        # except (OSError, EOFError):
-        #     self.__logger.error(f"Unsuccessful kill command after Machine thread joining on {self}")
+        # TODO: This method is taking too much time, needs improvement
+        try:
+            with self.__telnet_login() as tn:
+                # Kill first
+                tn.write(self.__command_factory.current_command_cmd_kill)
+                tn.read_very_eager()
+        except (OSError, EOFError):
+            self.__logger.error(f"Unsuccessful kill command after Machine thread joining on {self}")
         super(Machine, self).join(timeout)
 
     def stop(self) -> None:

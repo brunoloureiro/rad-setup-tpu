@@ -31,20 +31,20 @@ def __end_daemon_machines():
         machine.join()
 
 
-def __machine_thread_exception_handler(args):
+def __machine_thread_exception_handler(args: threading.ExceptHookArgs):
     """ It handles the exception on the Machine threads
     The args argument has the following attributes:
-    exc_type: Exception type.
-    exc_value: Exception value, can be None.
-    exc_traceback: Exception traceback, can be None.
-    thread: Thread which raised the exception, can be None. """
+    exc_type: Exception type --> DEPRECATED after Python 3.10, the value is ignored
+    exc_value: Exception value can be None.
+    exc_traceback: Exception trace-back can be None.
+    thread: Thread, which raised the exception, can be None. """
     # FIXME: some exceptions are problematic as not all attributes are available
     logger = logging.getLogger(name=PARENT_LOGGER_NAME)
     exception_str = "".join(
-        traceback.format_exception(etype=args.exc_type, value=args.exc_value, tb=args.exc_traceback)
+        traceback.format_exception(args.exc_type, value=args.exc_value, tb=args.exc_traceback)
     )
     logger.error(f"Error {exception_str} at Machine thread:{args.thread}")
-    # Log the thread that raise the
+    # Log the thread that raises the exception
     __end_daemon_machines()
     sys.exit(errno.ECHILD)
 
@@ -62,6 +62,10 @@ def __ctrlc_handler(signum, frame):
 
 def main():
     """ Main function """
+    # The First thing is to guarantee that python >=3.10 is running
+    if sys.version_info.major < 3 or sys.version_info.minor < 10:
+        raise ValueError("Python 3.10 or greater required")
+
     # Attach CTRL-C pressing to the function
     signal.signal(signal.SIGINT, __ctrlc_handler)
 
@@ -81,8 +85,9 @@ def main():
 
     # log format
     logger = logging_setup(logger_name=PARENT_LOGGER_NAME, log_file=server_log_file)
+    logger.info(f"Python version: {sys.version_info.major}.{sys.version_info.minor}")
 
-    # If path does not exist create it
+    # If a path does not exist, create it
     if os.path.isdir(server_log_store_dir) is False:
         os.mkdir(server_log_store_dir)
 

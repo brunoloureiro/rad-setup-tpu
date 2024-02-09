@@ -35,7 +35,7 @@ max_timeout_time: !!int 10
 # Disable the option for OS soft reboot before trying to hard reboot
 disable_os_soft_reboot: !!bool True
 
-# Json files that contains the commands
+# Json files that contain the commands
 json_files: [
 #  "/home/fernando/git_research/radiation-setup/machines_cfgs/cuda_micro.json",
     "/home/fernando/git_research/radiation-setup/machines_cfgs/dummy.json",
