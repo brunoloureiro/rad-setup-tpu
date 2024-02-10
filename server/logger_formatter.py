@@ -1,4 +1,6 @@
 import logging
+import queue
+import threading
 
 
 class ColoredFormatter(logging.Formatter):
@@ -39,22 +41,36 @@ class ColoredFormatter(logging.Formatter):
         return message
 
 
-# Custom logger class with multiple destinations
+class ServerMultipleThreadConsoleHandler(logging.StreamHandler):
+    def __init__(self, print_queue: queue.Queue, *args, **kwargs):
+        super(ServerMultipleThreadConsoleHandler, self).__init__(*args, **kwargs)
+        self.thread_data = threading.local()
+        self.__print_queue = print_queue
+
+    def emit(self, record: logging.LogRecord):
+        # thread_id = record.threadName
+        if not hasattr(self.thread_data, 'last_record'):
+            self.thread_data.last_record = None
+        if record != self.thread_data.last_record:
+            self.thread_data.last_record = record
+            self.__print_queue.put(record)
+
+
 class ColoredLogger(logging.Logger):
     FORMAT = "[$BOLD%(name)-17s$RESET][%(levelname)-7s] %(message)s ($BOLD%(filename)s$RESET:%(lineno)d) %(asctime)s"
     COLOR_FORMAT = ColoredFormatter.formatter_message(FORMAT)
 
-    def __init__(self, name):
+    def __init__(self, name, print_queue: queue.Queue):
         logging.Logger.__init__(self, name, logging.DEBUG)
 
         color_formatter = ColoredFormatter(self.COLOR_FORMAT)
 
-        console = logging.StreamHandler()
+        console = ServerMultipleThreadConsoleHandler(print_queue=print_queue)  # logging.StreamHandler()
         console.setFormatter(color_formatter)
         self.addHandler(console)
 
 
-def logging_setup(logger_name: str, log_file: str) -> logging.Logger:
+def logging_setup(logger_name: str, log_file: str, print_queue: queue.Queue) -> logging.Logger:
     """Logging setup
     :return: logger object
     """
@@ -73,7 +89,7 @@ def logging_setup(logger_name: str, log_file: str) -> logging.Logger:
     logger.addHandler(fh)
 
     # create console handler with a higher log level for console
-    console = ColoredLogger(logger_name)
+    console = ColoredLogger(name=logger_name, print_queue=print_queue)
     # noinspection PyTypeChecker
     logger.addHandler(console)
     return logger

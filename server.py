@@ -7,16 +7,21 @@ import signal
 import sys
 import threading
 import traceback
+import typing
 
 import yaml
 
 from server.logger_formatter import logging_setup
 from server.machine import Machine
+from server.print_manager import PrintManager
 
 # Logger name in the main server thread
 PARENT_LOGGER_NAME: str = os.path.basename(str(__file__).lower().replace(".py", ""))
+
+# Those global variables are necessary to stop all the threads when an exception is raised
 # Machine List
 MACHINE_LIST: list = list()
+PRINT_MANAGER: typing.Optional[PrintManager] = None
 
 
 def __end_daemon_machines():
@@ -29,6 +34,10 @@ def __end_daemon_machines():
     logger.info("Waiting for all threads to join")
     for machine in MACHINE_LIST:
         machine.join()
+
+    if PRINT_MANAGER is not None:
+        PRINT_MANAGER.stop()
+        PRINT_MANAGER.join()
 
 
 def __machine_thread_exception_handler(args: threading.ExceptHookArgs):
@@ -84,8 +93,13 @@ def main():
     server_ip = server_parameters['server_ip']
 
     # log format
-    logger = logging_setup(logger_name=PARENT_LOGGER_NAME, log_file=server_log_file)
-    logger.info(f"Python version: {sys.version_info.major}.{sys.version_info.minor}")
+    global PRINT_MANAGER
+    PRINT_MANAGER = PrintManager(daemon=True)
+    PRINT_MANAGER.start()
+
+    logger = logging_setup(logger_name=PARENT_LOGGER_NAME, log_file=server_log_file,
+                           print_queue=PRINT_MANAGER.print_queue)
+    logger.info(f"Python version: {sys.version_info.major}.{sys.version_info.minor} machine:{server_ip}")
 
     # If a path does not exist, create it
     if os.path.isdir(server_log_store_dir) is False:

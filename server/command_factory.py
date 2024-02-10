@@ -16,7 +16,7 @@ class CommandFactory:
             try:
                 with open(json_file) as fp:
                     machine_dict = json.load(fp)
-                    # The json files contains a list of dicts
+                    # The json files contain a list of dicts
                     self.__json_data_list.extend(machine_dict)
             except FileNotFoundError:
                 self.__logger.exception(f"Incorrect path for {json_file}, file not found")
