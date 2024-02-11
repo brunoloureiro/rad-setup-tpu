@@ -83,6 +83,7 @@ def main():
     parser.add_argument('-c', '--config', metavar='PATH_YAML_FILE', type=str, default="server_parameters.yaml",
                         help='Path to an YAML FILE that contains the server parameters. '
                              'Default is ./server_parameters.yaml')
+    parser.add_argument('--disable_curses', default=False, action="store_true", help='Disable curses display')
     args = parser.parse_args()
     # load yaml file
     with open(args.config, 'r') as fp:
@@ -94,11 +95,13 @@ def main():
 
     # log format
     global PRINT_MANAGER
-    PRINT_MANAGER = PrintManager(daemon=True)
-    PRINT_MANAGER.start()
+    print_queue = None
+    if args.disable_curses is False:
+        PRINT_MANAGER = PrintManager(daemon=True)
+        PRINT_MANAGER.start()
+        print_queue = PRINT_MANAGER.print_queue
 
-    logger = logging_setup(logger_name=PARENT_LOGGER_NAME, log_file=server_log_file,
-                           print_queue=PRINT_MANAGER.print_queue)
+    logger = logging_setup(logger_name=PARENT_LOGGER_NAME, log_file=server_log_file, print_queue=print_queue)
     logger.info(f"Python version: {sys.version_info.major}.{sys.version_info.minor} machine:{server_ip}")
 
     # If a path does not exist, create it

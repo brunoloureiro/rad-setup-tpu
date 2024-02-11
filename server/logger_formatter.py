@@ -1,6 +1,7 @@
 import logging
 import queue
 import threading
+import typing
 
 
 class ColoredFormatter(logging.Formatter):
@@ -60,17 +61,14 @@ class ColoredLogger(logging.Logger):
     FORMAT = "[$BOLD%(name)-17s$RESET][%(levelname)-7s] %(message)s ($BOLD%(filename)s$RESET:%(lineno)d) %(asctime)s"
     COLOR_FORMAT = ColoredFormatter.formatter_message(FORMAT)
 
-    def __init__(self, name, print_queue: queue.Queue):
+    def __init__(self, name, console_handler: logging.Handler):
         logging.Logger.__init__(self, name, logging.DEBUG)
-
         color_formatter = ColoredFormatter(self.COLOR_FORMAT)
-
-        console = ServerMultipleThreadConsoleHandler(print_queue=print_queue)  # logging.StreamHandler()
-        console.setFormatter(color_formatter)
-        self.addHandler(console)
+        console_handler.setFormatter(color_formatter)
+        self.addHandler(console_handler)
 
 
-def logging_setup(logger_name: str, log_file: str, print_queue: queue.Queue) -> logging.Logger:
+def logging_setup(logger_name: str, log_file: str, print_queue: typing.Union[queue.Queue, None]) -> logging.Logger:
     """Logging setup
     :return: logger object
     """
@@ -89,7 +87,10 @@ def logging_setup(logger_name: str, log_file: str, print_queue: queue.Queue) -> 
     logger.addHandler(fh)
 
     # create console handler with a higher log level for console
-    console = ColoredLogger(name=logger_name, print_queue=print_queue)
+    console_handler = logging.StreamHandler()
+    if print_queue is not None:
+        console_handler = ServerMultipleThreadConsoleHandler(print_queue=print_queue)
+    console = ColoredLogger(name=logger_name, console_handler=console_handler)
     # noinspection PyTypeChecker
     logger.addHandler(console)
     return logger
