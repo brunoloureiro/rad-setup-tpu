@@ -4,15 +4,31 @@ import queue
 import textwrap
 import threading
 
+# It's better to have module global var to manage the Queue
+_PRINTING_QUEUE = queue.Queue()
 
-class PrintManager(threading.Thread):
+
+class ServerMultipleThreadConsoleHandler(logging.StreamHandler):
+    def __init__(self, *args, **kwargs):
+        super(ServerMultipleThreadConsoleHandler, self).__init__(*args, **kwargs)
+        self.thread_data = threading.local()
+
+    def emit(self, record: logging.LogRecord):
+        # thread_id = record.threadName
+        if not hasattr(self.thread_data, 'last_record'):
+            self.thread_data.last_record = None
+        if record != self.thread_data.last_record:
+            self.thread_data.last_record = record
+            _PRINTING_QUEUE.put(record)
+
+
+class ConsoleCursesManager(threading.Thread):
     # This is used to wait between the dequeue iterations
     __REFRESH_INTERVAL = 0.01
 
     def __init__(self, daemon: bool, *args, **kwargs):
-        self.__print_queue = queue.Queue()
         self.__stop_event = threading.Event()
-        super(PrintManager, self).__init__(daemon=daemon, *args, **kwargs)
+        super(ConsoleCursesManager, self).__init__(daemon=daemon, *args, **kwargs)
         self.__current_print_dict = dict()
         self.__std_scr = curses.initscr()
 
@@ -27,8 +43,8 @@ class PrintManager(threading.Thread):
         self.__std_scr.bkgd(background_color)
 
         while self.__stop_event.is_set() is False:
-            while not self.__print_queue.empty():
-                record: logging.LogRecord = self.__print_queue.get()
+            while not _PRINTING_QUEUE.empty():
+                record: logging.LogRecord = _PRINTING_QUEUE.get()
                 key = f'{record.threadName}'
                 message =(
                     f"{record.filename}:{record.lineno}--{record.funcName} "
@@ -61,10 +77,6 @@ class PrintManager(threading.Thread):
             self.__stop_event.wait(timeout=self.__REFRESH_INTERVAL)
 
         curses.endwin()  # Clean up
-
-    @property
-    def print_queue(self) -> queue.Queue:
-        return self.__print_queue
 
     def stop(self) -> None:
         """ Stop the main function before join the thread """

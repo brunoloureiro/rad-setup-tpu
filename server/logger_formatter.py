@@ -1,7 +1,6 @@
 import logging
-import queue
-import threading
-import typing
+
+from .print_manager import ServerMultipleThreadConsoleHandler
 
 
 class ColoredFormatter(logging.Formatter):
@@ -42,21 +41,6 @@ class ColoredFormatter(logging.Formatter):
         return message
 
 
-class ServerMultipleThreadConsoleHandler(logging.StreamHandler):
-    def __init__(self, print_queue: queue.Queue, *args, **kwargs):
-        super(ServerMultipleThreadConsoleHandler, self).__init__(*args, **kwargs)
-        self.thread_data = threading.local()
-        self.__print_queue = print_queue
-
-    def emit(self, record: logging.LogRecord):
-        # thread_id = record.threadName
-        if not hasattr(self.thread_data, 'last_record'):
-            self.thread_data.last_record = None
-        if record != self.thread_data.last_record:
-            self.thread_data.last_record = record
-            self.__print_queue.put(record)
-
-
 class ColoredLogger(logging.Logger):
     FORMAT = "[$BOLD%(name)-17s$RESET][%(levelname)-7s] %(message)s ($BOLD%(filename)s$RESET:%(lineno)d) %(asctime)s"
     COLOR_FORMAT = ColoredFormatter.formatter_message(FORMAT)
@@ -68,7 +52,7 @@ class ColoredLogger(logging.Logger):
         self.addHandler(console_handler)
 
 
-def logging_setup(logger_name: str, log_file: str, print_queue: typing.Union[queue.Queue, None]) -> logging.Logger:
+def logging_setup(logger_name: str, log_file: str, disable_curses: bool) -> logging.Logger:
     """Logging setup
     :return: logger object
     """
@@ -86,10 +70,7 @@ def logging_setup(logger_name: str, log_file: str, print_queue: typing.Union[que
     fh.setFormatter(file_formatter)
     logger.addHandler(fh)
 
-    # create console handler with a higher log level for console
-    console_handler = logging.StreamHandler()
-    if print_queue is not None:
-        console_handler = ServerMultipleThreadConsoleHandler(print_queue=print_queue)
+    console_handler = logging.StreamHandler() if disable_curses is True else ServerMultipleThreadConsoleHandler()
     console = ColoredLogger(name=logger_name, console_handler=console_handler)
     # noinspection PyTypeChecker
     logger.addHandler(console)

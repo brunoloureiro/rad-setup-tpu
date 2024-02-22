@@ -13,7 +13,7 @@ import yaml
 
 from server.logger_formatter import logging_setup
 from server.machine import Machine
-from server.print_manager import PrintManager
+from server.print_manager import ConsoleCursesManager
 
 # Logger name in the main server thread
 PARENT_LOGGER_NAME: str = os.path.basename(str(__file__).lower().replace(".py", ""))
@@ -21,7 +21,9 @@ PARENT_LOGGER_NAME: str = os.path.basename(str(__file__).lower().replace(".py", 
 # Those global variables are necessary to stop all the threads when an exception is raised
 # Machine List
 MACHINE_LIST: list = list()
-PRINT_MANAGER: typing.Optional[PrintManager] = None
+CONSOLE_CURSES_MANAGER: typing.Optional[ConsoleCursesManager] = None
+
+THREAD_JOIN_TIMEOUT: float = 1.0
 
 
 def __end_daemon_machines():
@@ -33,11 +35,11 @@ def __end_daemon_machines():
         machine.stop()
     logger.info("Waiting for all threads to join")
     for machine in MACHINE_LIST:
-        machine.join()
+        machine.join(timeout=THREAD_JOIN_TIMEOUT)
 
-    if PRINT_MANAGER is not None:
-        PRINT_MANAGER.stop()
-        PRINT_MANAGER.join()
+    if CONSOLE_CURSES_MANAGER is not None:
+        CONSOLE_CURSES_MANAGER.stop()
+        CONSOLE_CURSES_MANAGER.join()
 
 
 def __machine_thread_exception_handler(args: threading.ExceptHookArgs):
@@ -93,15 +95,13 @@ def main():
     server_log_store_dir = server_parameters['server_log_store_dir']
     server_ip = server_parameters['server_ip']
 
-    # log format
-    global PRINT_MANAGER
-    print_queue = None
+    # log in the stdout
+    global CONSOLE_CURSES_MANAGER
     if args.disable_curses is False:
-        PRINT_MANAGER = PrintManager(daemon=True)
-        PRINT_MANAGER.start()
-        print_queue = PRINT_MANAGER.print_queue
+        CONSOLE_CURSES_MANAGER = ConsoleCursesManager(daemon=True)
+        CONSOLE_CURSES_MANAGER.start()
 
-    logger = logging_setup(logger_name=PARENT_LOGGER_NAME, log_file=server_log_file, print_queue=print_queue)
+    logger = logging_setup(logger_name=PARENT_LOGGER_NAME, log_file=server_log_file, disable_curses=args.disable_curses)
     logger.info(f"Python version: {sys.version_info.major}.{sys.version_info.minor} machine:{server_ip}")
 
     # If a path does not exist, create it
