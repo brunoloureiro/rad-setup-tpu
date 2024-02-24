@@ -70,7 +70,7 @@ It is preferable to use PyCharm tools for editing.
 ## Issues that need addressing:
 
 - [ ] Telnet is silent failing, details [here](https://github.com/radhelper/radiation-setup/issues/1)
-- [ ] Configurations should circulate only the timestamp of 1h is finished; details [here](https://github.com/radhelper/radiation-setup/issues/3)
+- [ ] Configurations should circulate only when the timestamp of 1h is finished; details [here](https://github.com/radhelper/radiation-setup/issues/3)
 - [ ] After the user stops the server, the configurations on the device keep running. Details [here](https://github.com/radhelper/radiation-setup/issues/4)
 - [ ] Evaluate the advantages of Telnet over SSH
 
