@@ -64,4 +64,17 @@ These parameters will be passed to the system under test.
 The Python modules development follows (or at least we try) the 
 [PEP8](https://www.python.org/dev/peps/pep-0008/) development rules. 
 On the client side, we try to be as straightforward as possible.
-If you wish to collaborate, submit a pull request.
+If you wish to collaborate, submit a pull request. 
+
+**It is preferable to use IntelliJ IDEA tools for editing, i.e., Pycharm and Clion.**
+
+## Issues that need addressing:
+
+- [ ] Telnet is silent failing, details [here](https://github.com/radhelper/radiation-setup/issues/1)
+- [ ] Configurations should circulate only when the timestamp of 1h is finished; details [here](https://github.com/radhelper/radiation-setup/issues/3)
+- [ ] After the user stops the server, the configurations on the device keep running. Details [here](https://github.com/radhelper/radiation-setup/issues/4)
+- [ ] Evaluate the advantages of Telnet over SSH
+
+  
+
+
