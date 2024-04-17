@@ -40,10 +40,15 @@ class Machine(threading.Thread):
     __POWER_SWITCH_DEFAULT_TIME_REST = 4
     __READ_EAGER_TIMEOUT = 1
     __BOOT_PING_TIMEOUT = 2
+
+    # This time is just to make the OS start the rebooting process;
+    # otherwise the next ping will be successful, right after sudo reboot command
     __WAIT_AFTER_SOFT_OS_REBOOT_TIME = 5
 
     # Possible connection string
-    __ALL_POSSIBLE_CONNECTION_TYPES = ['#IT', '#HEADER', '#BEGIN', '#END', '#INF', '#ERR']  # Add more if necessary
+    __ALL_POSSIBLE_CONNECTION_TYPES = [  # Add more if necessary
+        '#IT', '#HEADER', '#BEGIN', '#END', '#INF', '#ERR', "#SDC", "#ABORT"
+    ]
 
     def __init__(self, configuration_file: str, server_ip: str, logger_name: str, server_log_path: str,
                  *args, **kwargs):
@@ -122,7 +127,7 @@ class Machine(threading.Thread):
                 data, address = self.__messages_socket.recvfrom(self.__DATA_SIZE)
                 self.__dut_logging_obj(message=data)
                 data_decoded = data.decode("ascii")
-                connection_type_str = "UNKNOWN_CONNECTION_TYPE"
+                connection_type_str = f"UNKNOWN_CONNECTION_TYPE:{data_decoded[0:10]}"
                 for substring in self.__ALL_POSSIBLE_CONNECTION_TYPES:
                     if data_decoded.startswith(substring):
                         connection_type_str = substring
@@ -147,7 +152,7 @@ class Machine(threading.Thread):
                     continue
                 # Soft OS reboot
                 soft_os_reboot = self.__soft_os_reboot()
-                if soft_os_reboot == ErrorCodes.SUCCESS and soft_app_reboot_status != ErrorCodes.HOST_UNREACHABLE:
+                if soft_os_reboot == ErrorCodes.SUCCESS:
                     self.__soft_app_reboot(previous_log_end_status=EndStatus.SOFT_OS_REBOOT)
                     continue
                 # Finally, the Power cycle Hard reboot
@@ -159,12 +164,20 @@ class Machine(threading.Thread):
         :return:
         """
         tn = telnetlib.Telnet(self.__dut_ip, timeout=self.__max_timeout_time)
-        tn.read_until(b'ogin: ', timeout=self.__max_timeout_time)
+
+        if not tn.read_until(b'ogin: ', timeout=self.__max_timeout_time):
+            raise RuntimeError("Telnet error: Failed to login into Telnet. Could not input username.")
         tn.write(self.__dut_username.encode('ascii') + b'\n')
         tn.read_very_eager()
-        tn.read_until(b'assword: ', timeout=self.__max_timeout_time)
+
+        if not tn.read_until(b'assword: ', timeout=self.__max_timeout_time):
+            raise RuntimeError("Telnet error: Could not login into Telnet. Could not input password.")
         tn.write(self.__dut_password.encode('ascii') + b'\n')
-        tn.read_until(b'$ ', timeout=self.__max_timeout_time)
+
+        if not tn.read_until(b'$ ', timeout=self.__max_timeout_time):
+            raise RuntimeError("Telnet error: Could not login into Telnet. Failed after trying to enter inputs.")
+
+        self.__logger.debug("Successfully logged into Telnet.")
         return tn
 
     def __soft_app_reboot(self, previous_log_end_status: EndStatus = None) -> ErrorCodes:
@@ -173,6 +186,9 @@ class Machine(threading.Thread):
         then pass the end_status, otherwise leave it None
         :return: If the start was successful or not
         """
+        if self.__stop_event.is_set():
+            return ErrorCodes.THREAD_EVENT_IS_SET
+
         if previous_log_end_status is None and self.__dut_logging_obj is not None:
             self.__logger.exception(
                 f"INCORRECT CONFIGURATION: previous_ending_status is None and __dut_logging_obj is Not None - {self}")
@@ -189,7 +205,6 @@ class Machine(threading.Thread):
         # The commands are already encoded
         cmd_line_run, cmd_kill, test_name, header = self.__command_factory.get_commands_and_test_info()
         # try __MAX_START_APP_TRIES times to start the app on the DUT
-        last_error_type = ErrorCodes.TELNET_CONNECTION_ERROR
         for try_i in range(self.__MAX_TELNET_TRIES):
             # All loops must stop after the event is set
             if self.__stop_event.is_set():
@@ -222,10 +237,13 @@ class Machine(threading.Thread):
             except OSError as e:
                 if e.errno == errno.EHOSTUNREACH:
                     self.__logger.error(f"Host unreachable {self} ")
-                    last_error_type = ErrorCodes.HOST_UNREACHABLE
+                    return ErrorCodes.HOST_UNREACHABLE
+            except RuntimeError as e:
+                self.__logger.error(f"{e} {self}")
+                return ErrorCodes.TELNET_CONNECTION_ERROR
             except EOFError:
                 self.__logger.info(f"Command execution not successful TRY:{try_i} on {self}")
-        return last_error_type
+        return ErrorCodes.TELNET_CONNECTION_ERROR
 
     def __wait_for_booting(self):
         current_timestamp = time.time()
@@ -245,28 +263,22 @@ class Machine(threading.Thread):
                 # return ErrorCodes.SUCCESS
             except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as e:
                 self.__logger.error(f"Boot ping failed {self} error:{e}")
-            except (OSError, EOFError) as e:
+            except (OSError, EOFError, RuntimeError) as e:
                 self.__logger.error(f"Telnet conn failed {self} error:{e}")
-                if e.errno == errno.ECONNREFUSED:
+                if isinstance(e, OSError) and e.errno == errno.ECONNREFUSED:
                     # When connection is refused, it crashes instantaneously
                     self.__stop_event.wait(self.__BOOT_PING_TIMEOUT)
             current_timestamp = time.time()
-            # self.__stop_event.wait(1)
-            # try:
-            #     with self.__telnet_login():
-            #         return ErrorCodes.SUCCESS
-            # except OSError as e:
-            #     if e.errno == errno.EHOSTUNREACH:
-            #         self.__logger.error(f"Boot host unreachable {self} ")
-            #         # return ErrorCodes.HOST_UNREACHABLE
-            # except EOFError:
-            #     continue
+
         return ErrorCodes.HOST_UNREACHABLE
 
     def __soft_os_reboot(self):
         """ SOFT OS REBOOT: Reboot the operating system, or try to reboot using telnet
             THE KILL APP WILL MAKE THE LOGGING ENDING BASED ON THE EndStatus
         """
+        if self.__stop_event.is_set():
+            return ErrorCodes.THREAD_EVENT_IS_SET
+
         if self.__disable_os_soft_reboot is True:
             return ErrorCodes.DISABLED_SOFT_OS_REBOOT
 
@@ -286,7 +298,8 @@ class Machine(threading.Thread):
 
             self.__logger.info(f"SUCCESSFUL OS REBOOT:{default_os_reboot_cmd} "
                                f"COUNTER:{self.__soft_os_reboot_count} on {self}")
-            # must wait after soft reboot
+            # This time is just to make the OS start the rebooting process;
+            # otherwise the next ping will be successful, right after sudo reboot command
             self.__stop_event.wait(self.__WAIT_AFTER_SOFT_OS_REBOOT_TIME)
             # Wait the machine to boot
             self.__wait_for_booting()
@@ -295,14 +308,20 @@ class Machine(threading.Thread):
             self.__soft_os_reboot_count += 1
             # return self.__soft_app_reboot(previous_log_end_status=EndStatus.SOFT_OS_REBOOT)
             return ErrorCodes.SUCCESS
-        except (OSError, EOFError):
-            self.__logger.error(f"Soft OS reboot not successful {self}")
+        except (OSError, EOFError, RuntimeError) as e:
+            self.__logger.error(f"Soft OS reboot not successful {self} - {e}")
+            if isinstance(e, OSError) and e.errno == errno.EHOSTUNREACH:
+                self.__logger.error(f"Host unreachable {self} ")
+                return ErrorCodes.HOST_UNREACHABLE
             return ErrorCodes.TELNET_CONNECTION_ERROR
 
     def __hard_reboot(self):
         """ reboot the device based on reboot_machine module
         :return reboot_status
         """
+        if self.__stop_event.is_set():
+            return ErrorCodes.THREAD_EVENT_IS_SET
+
         reboot_sleep_time = self.__POWER_SWITCH_DEFAULT_TIME_REST
         if self.__hard_reboot_count > self.__MAX_SEQUENTIALLY_HARD_REBOOTS:
             # We turn off the device for __LONG_REBOOT_WAIT_TIME_AFTER_PROBLEM seconds
@@ -335,14 +354,21 @@ class Machine(threading.Thread):
 
     def join(self, timeout: Optional[float] = None) -> None:
         self.__logger.info(f"Joining Machine {self}.")
-        # TODO: This method is taking too much time, needs improvement
-        try:
-            with self.__telnet_login() as tn:
-                # Kill first
-                tn.write(self.__command_factory.current_command_cmd_kill)
-                tn.read_very_eager()
-        except (OSError, EOFError):
-            self.__logger.error(f"Unsuccessful kill command after Machine thread joining on {self}")
+        # FIXME: This method is taking too much time, needs improvement
+
+        # # Test if the board is alive
+        # # Pinging the board
+        # try:
+        #     subprocess.check_output(["ping", "-c", "1", self.__dut_ip], timeout=self.__BOOT_PING_TIMEOUT)
+        #     with self.__telnet_login() as tn:
+        #         # Kill first
+        #         tn.write(self.__command_factory.current_command_cmd_kill)
+        #         tn.read_very_eager()
+        # except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as e:
+        #     self.__logger.error(f"Ping failed while trying to join the thread {self} error:{e}")
+        # except (OSError, EOFError, RuntimeError) as e:
+        #     self.__logger.error(f"Unsuccessful kill command after Machine thread joining on {self} - {e}")
+
         super(Machine, self).join(timeout)
 
     def stop(self) -> None:

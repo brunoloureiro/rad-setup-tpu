@@ -16,6 +16,7 @@ class ErrorCodes(Enum):
     MAXIMUM_OS_REBOOT_REACHED = auto()
     DISABLED_SOFT_OS_REBOOT = auto()
     HOST_UNREACHABLE = auto()
+    THREAD_EVENT_IS_SET = auto()
 
     def __str__(self) -> str:
         """Override the str method
