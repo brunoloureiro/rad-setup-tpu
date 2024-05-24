@@ -127,8 +127,13 @@ class Machine(threading.Thread):
                 data, address = self.__messages_socket.recvfrom(self.__DATA_SIZE)
                 self.__dut_logging_obj(message=data)
                 data_decoded = data.decode("ascii")[1:]
+<<<<<<< HEAD
                 connection_type_str = f"UNKNOWN_CONNECTION_TYPE:{data_decoded[0:10]}"
+=======
+                connection_type_str = "UnknownConn:" + data_decoded[:10]
+>>>>>>> 6ed280c (Fix bug: now the hard_reboot_counter is reset after the Machine thread receives an #IT connection)
                 for substring in self.__ALL_POSSIBLE_CONNECTION_TYPES:
+                    # It must start from the 1, as the 0 is the ECC defining byte
                     if data_decoded.startswith(substring):
                         connection_type_str = substring
                         break
@@ -223,8 +228,9 @@ class Machine(threading.Thread):
                     # Never sleep with time, but with event
                     self.__stop_event.wait(self.__READ_EAGER_TIMEOUT)
                     # If it reaches here, the app is running
-                    self.__logger.info(f"SUCCESSFUL SOFT REBOOT CMDS:{cmd_kill} COUNTER:{self.__soft_app_reboot_count} "
-                                       f"TRY:{try_i} on {self}")
+                    self.__logger.info(f"SUCCESSFULLY SEND THE SOFT REBOOT CMDS:{cmd_kill} "
+                                       f"COUNTER:{self.__soft_app_reboot_count} "
+                                       f"TRY:{try_i} on {self} CMDEXEC={cmd_line_run[:10]}...")
                     # Close the DUTLogging only if there is a log file open
                     if self.__dut_logging_obj:
                         self.__dut_logging_obj.finish_this_dut_log(end_status=previous_log_end_status)

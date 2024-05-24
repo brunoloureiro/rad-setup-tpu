@@ -52,7 +52,7 @@ class ColoredLogger(logging.Logger):
         self.addHandler(console_handler)
 
 
-def logging_setup(logger_name: str, log_file: str, disable_curses: bool) -> logging.Logger:
+def logging_setup(logger_name: str, log_file: str, enable_curses: bool) -> logging.Logger:
     """Logging setup
     :return: logger object
     """
@@ -70,7 +70,7 @@ def logging_setup(logger_name: str, log_file: str, disable_curses: bool) -> logg
     fh.setFormatter(file_formatter)
     logger.addHandler(fh)
 
-    console_handler = logging.StreamHandler() if disable_curses is True else ServerMultipleThreadConsoleHandler()
+    console_handler = ServerMultipleThreadConsoleHandler() if enable_curses else logging.StreamHandler()
     console = ColoredLogger(name=logger_name, console_handler=console_handler)
     # noinspection PyTypeChecker
     logger.addHandler(console)

@@ -92,7 +92,7 @@ def main():
     parser.add_argument('-c', '--config', metavar='PATH_YAML_FILE', type=str, default="server_parameters.yaml",
                         help='Path to an YAML FILE that contains the server parameters. '
                              'Default is ./server_parameters.yaml')
-    parser.add_argument('--disable_curses', default=False, action="store_true", help='Disable curses display')
+    parser.add_argument('--enable_curses', default=False, action="store_true", help='Enable curses display')
     args = parser.parse_args()
     # load yaml file
     with open(args.config, 'r') as fp:
@@ -104,11 +104,11 @@ def main():
 
     # log in the stdout
     global CONSOLE_CURSES_MANAGER
-    if args.disable_curses is False:
+    if args.enable_curses is True:
         CONSOLE_CURSES_MANAGER = ConsoleCursesManager(daemon=True)
         CONSOLE_CURSES_MANAGER.start()
 
-    logger = logging_setup(logger_name=PARENT_LOGGER_NAME, log_file=server_log_file, disable_curses=args.disable_curses)
+    logger = logging_setup(logger_name=PARENT_LOGGER_NAME, log_file=server_log_file, enable_curses=args.enable_curses)
     logger.info(f"Python version: {sys.version_info.major}.{sys.version_info.minor} machine:{server_ip}")
 
     # If a path does not exist, create it
