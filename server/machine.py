@@ -126,7 +126,7 @@ class Machine(threading.Thread):
             try:
                 data, address = self.__messages_socket.recvfrom(self.__DATA_SIZE)
                 self.__dut_logging_obj(message=data)
-                data_decoded = data.decode("ascii")
+                data_decoded = data.decode("ascii")[1:]
                 connection_type_str = f"UNKNOWN_CONNECTION_TYPE:{data_decoded[0:10]}"
                 for substring in self.__ALL_POSSIBLE_CONNECTION_TYPES:
                     if data_decoded.startswith(substring):
@@ -138,6 +138,7 @@ class Machine(threading.Thread):
                 # in a short period, but eventually comes to life again
                 if connection_type_str == "#IT":
                     self.__soft_app_reboot_count = 0
+                    self.__hard_reboot_count = 0
 
                 self.__logger.debug(f"{connection_type_str} - Connection from {self}")
 

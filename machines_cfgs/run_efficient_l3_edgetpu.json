@@ -1,0 +1,8 @@
+[
+  {
+    "killcmd": "sudo pkill -9 -f run_model.py",
+    "exec": "/home/carol/tpu-rad/run_model.py -m /home/carol/tpu-rad/models/efficient_l3_edgetpu.tflite -i /home/carol/tpu-rad/inputs/efficient_l3_images.npy -g /home/carol/tpu-rad/golden/efficient_l3_golden.npy --vit -n 32 -r",
+    "codename": "run_efficient_vit",
+    "header": "--model efficient_l3_edgetpu.tflite -n 32 --vit"
+  }
+]

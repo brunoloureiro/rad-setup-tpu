@@ -1,8 +1,0 @@
-[
-  {
-    "killcmd": "killall -9 example_cxx",
-    "exec": "/home/carol/libLogHelper/build/examples/example_cxx",
-    "codename": "example_cxx",
-    "header": "dummy example_cxx from LibLogHelper"
-  }
-]

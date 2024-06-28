@@ -1,0 +1,8 @@
+[
+  {
+    "killcmd": "sudo pkill -9 -f run_model.py",
+    "exec": "/home/carol/tpu-rad/run_model.py -m /home/carol/tpu-rad/models/dleit_fs_hs96_hl3_ah6_is192_im64_ps8_layeredheads_edgetpu.tflite -i /home/carol/tpu-rad/inputs/images_hs96_im64_ps8.npy -t /home/carol/tpu-rad/inputs/tokens_hs96_im64_ps8.npy -g /home/carol/tpu-rad/golden/dleit_fs_hs96_hl3_ah6_is192_im64_ps8_layeredheads_edgetpu.npy -n 32",
+    "codename": "run_dleit",
+    "header": "--model dleit_fs_hs96_hl3_ah6_is192_im64_ps8_layeredheads_edgetpu.tflite -n 32"
+  }
+]
