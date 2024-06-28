@@ -1,0 +1,53 @@
+# Configuration example for carolk401 device
+
+# the IP address of the machine
+ip: 192.168.1.23
+
+# Port that the device will send data
+receive_port: 1027
+
+# hostname the hostname of the machine, that must contains the device in the name
+hostname: rasp4-coral4
+
+# username
+username: carol
+
+# password of the device
+password: R@diation
+
+# power_switch_ip IP address of the power switch
+power_switch_ip: 192.168.1.120
+
+# power_switch_port outlet of the power switch
+power_switch_port: !!int 5
+
+# power_switch_model brand of the power switch
+power_switch_model: lindy
+
+# The server will wait for this time for the OS booting
+# In seconds
+boot_waiting_time: !!int 60
+
+# connection timeout
+# This is the maximum time interval between the messages received
+max_timeout_time: !!int 30
+
+# Disable the option for OS soft reboot before trying to hard reboot
+disable_os_soft_reboot: !!bool True
+
+# Json files that contain the commands
+json_files: [
+    #"/home/carol/radiation-setup/machines_cfgs/run_vit_base_8_edgetpu.json",
+    #"/home/carol/radiation-setup/machines_cfgs/run_vit_base_16_edgetpu.json",
+    #"/home/carol/radiation-setup/machines_cfgs/run_efficient_l3_edgetpu.json",
+    #"/home/carol/radiation-setup/machines_cfgs/run_dleit_fs_hs96_hl3_ah6_is192_im64_ps8_layeredheads_edgetpu.json",
+    #"/home/carol/radiation-setup/machines_cfgs/run_mha_from_image_v8.json",
+    #"/home/carol/radiation-setup/machines_cfgs/run_final_block_v8.json",
+    #"/home/carol/radiation-setup/machines_cfgs/run_main_block_from_image_v8.json",
+    #"/home/carol/radiation-setup/machines_cfgs/run_patch_encoding_v8.json",
+    "/home/carol/radiation-setup/machines_cfgs/run_mha_from_image_v16.json",
+    #"/home/carol/radiation-setup/machines_cfgs/run_final_block_v16.json",
+    #"/home/carol/radiation-setup/machines_cfgs/run_main_block_from_image_v16.json",
+    #"/home/carol/radiation-setup/machines_cfgs/run_patch_encoding_v16.json",
+]
+

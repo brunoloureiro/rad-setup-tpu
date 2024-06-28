@@ -1,0 +1,8 @@
+[
+  {
+    "killcmd": "sudo pkill -9 -f run_model.py",
+    "exec": "/home/carol/tpu-rad/run_model.py -m /home/carol/tpu-rad/models/vit16_im64_ps8_proj256_nlayers3_nheads16_mlphead256_FINAL_BLOCK_edgetpu.tflite -i /home/carol/tpu-rad/inputs/vit_base_16_FINAL_BLOCK_inputs.npy -g /home/carol/tpu-rad/golden/vit_base_16_golden_FINAL_BLOCK.npy --vit -n 32",
+    "codename": "run_final_block_v16",
+    "header": "--model vit16_FINAL_BLOCK_v16_edgetpu.tflite -n 32 --vit"
+  }
+]

@@ -2,7 +2,7 @@
 # No more magic paths and numbers
 
 # IP of the remote socket server (hardware watchdog)
-server_ip: 192.168.1.5
+server_ip: 192.168.1.6
 
 # log in whatever path you are executing this script
 server_log_file: server.log
@@ -16,10 +16,16 @@ server_log_store_dir: logs/
 machines: [
   # The server will check this machine
   {
-    "enabled": True, "cfg_file": "machines_cfgs/carolk401.yaml"
+    "enabled": True, "cfg_file": "machines_cfgs/rasp4coral.yaml"
   },
   # The server will not check this machine
   {
-    "enabled": False, "cfg_file": "machines_cfgs/p20001.yaml"
+    "enabled": True, "cfg_file": "machines_cfgs/rasp4coral2.yaml"
+  },
+  {
+    "enabled": True, "cfg_file": "machines_cfgs/rasp4coral3.yaml"
+  },
+  {
+    "enabled": True, "cfg_file": "machines_cfgs/rasp4coral4.yaml"
   },
 ]

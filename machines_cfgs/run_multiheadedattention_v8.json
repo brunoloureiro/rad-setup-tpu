@@ -1,0 +1,8 @@
+[
+  {
+    "killcmd": "sudo pkill -9 -f run_model.py",
+    "exec": "/home/carol/tpu-rad/run_model.py -m /home/carol/tpu-rad/models/vit_im64_ps8_proj128_nlayers3_nheads8_mlphead256_MHA_ONLY_edgetpu.tflite -i /home/carol/tpu-rad/inputs/vit_base_8_inputs_MHA_ONLY.npy -g /home/carol/tpu-rad/golden/vit_base_8_golden_MHA_ONLY.npy --vit -n 32",
+    "codename": "run_multiheadedattention_v8",
+    "header": "--model vit_MHA_ONLY_v8_edgetpu.tflite -n 32 --vit"
+  }
+]
