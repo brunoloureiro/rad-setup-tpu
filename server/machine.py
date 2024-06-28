@@ -127,11 +127,9 @@ class Machine(threading.Thread):
                 data, address = self.__messages_socket.recvfrom(self.__DATA_SIZE)
                 self.__dut_logging_obj(message=data)
                 data_decoded = data.decode("ascii")[1:]
-<<<<<<< HEAD
-                connection_type_str = f"UNKNOWN_CONNECTION_TYPE:{data_decoded[0:10]}"
-=======
+                
                 connection_type_str = "UnknownConn:" + data_decoded[:10]
->>>>>>> 6ed280c (Fix bug: now the hard_reboot_counter is reset after the Machine thread receives an #IT connection)
+
                 for substring in self.__ALL_POSSIBLE_CONNECTION_TYPES:
                     # It must start from the 1, as the 0 is the ECC defining byte
                     if data_decoded.startswith(substring):

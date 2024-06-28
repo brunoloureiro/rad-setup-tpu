@@ -1,0 +1,42 @@
+# Configuration example for carolk401 device
+
+# the IP address of the machine
+ip:  192.168.195.6
+
+# Port that the device will send data
+receive_port: 1024
+
+# hostname the hostname of the machine, that must contains the device in the name
+hostname: caroldummy
+
+# username
+username: carol
+
+# password of the device
+password: qwerty0
+
+# power_switch_ip IP address of the power switch
+power_switch_ip: 192.168.1.100
+
+# power_switch_port outlet of the power switch
+power_switch_port: !!int 1
+
+# power_switch_model brand of the power switch
+power_switch_model: lindy
+
+# The server will wait for this time for the OS booting
+# In seconds
+boot_waiting_time: !!int 60
+
+# connection timeout
+# This is the maximum time interval between the messages received
+max_timeout_time: !!int 10
+
+# Disable the option for OS soft reboot before trying to hard reboot
+disable_os_soft_reboot: !!bool True
+
+# Json files that contain the commands
+json_files: [
+#  "/home/fernando/git_research/radiation-setup/machines_cfgs/cuda_micro.json",
+    "/home/fernando/git_research/radiation-setup/machines_cfgs/dummy.json",
+]
