@@ -1,7 +1,7 @@
 [
   {
     "killcmd": "sudo pkill -9 -f run_model.py",
-    "exec": "/home/carol/tpu-rad/run_model.py -m /home/carol/tpu-rad/models/vit_im64_ps8_proj128_nlayers3_nheads8_mlphead256_FINAL_BLOCK_edgetpu.tflite -i /home/carol/tpu-rad/inputs/vit_base_8_FINAL_BLOCK_inputs.npy -g /home/carol/tpu-rad/golden/vit_base_8_golden_FINAL_BLOCK.npy --vit -n 32",
+    "exec": "/home/carol/tpu-rad/run_model.py -m /home/carol/tpu-rad/models/vit_im64_ps8_proj128_nlayers3_nheads8_mlphead256_FINAL_BLOCK_edgetpu.tflite -i /home/carol/tpu-rad/inputs/vit_base_8_FINAL_BLOCK_inputs.npy -g /home/carol/tpu-rad/golden/vit_base_8_golden_FINAL_BLOCK.npy --vit -n 32 --log_interval 10",
     "codename": "run_final_block_v8",
     "header": "--model vit_FINAL_BLOCK_v8_edgetpu.tflite -n 32 --vit"
   }

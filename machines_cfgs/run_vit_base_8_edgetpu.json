@@ -1,7 +1,7 @@
 [
   {
     "killcmd": "sudo pkill -9 -f run_model.py",
-    "exec": "/home/carol/tpu-rad/run_model.py -m /home/carol/tpu-rad/models/vit_base_8_edgetpu.tflite -i /home/carol/tpu-rad/inputs/vit_base_8_images.npy -g /home/carol/tpu-rad/golden/vit_base_8_golden.npy --vit -n 32",
+    "exec": "/home/carol/tpu-rad/run_model.py -m /home/carol/tpu-rad/models/vit_base_8_edgetpu.tflite -i /home/carol/tpu-rad/inputs/vit_base_8_images.npy -g /home/carol/tpu-rad/golden/vit_base_8_golden.npy --vit -n 32 --log_interval 10",
     "codename": "run_base_vit_8",
     "header": "--model vit_base_8_edgetpu.tflite -n 32 --vit"
   }
