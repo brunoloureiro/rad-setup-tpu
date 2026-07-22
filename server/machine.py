@@ -3,7 +3,6 @@ import logging
 import os
 import socket
 import subprocess
-import telnetlib
 import threading
 import time
 import enum
@@ -12,6 +11,8 @@ from typing import Optional
 import yaml
 
 from .command_factory import CommandFactory
+from .dut_commands import DUTCommand, DUTCommandDispatcher
+from .dut_connection import DUTConnection, create_dut_connection
 from .dut_logging import DUTLogging, EndStatus
 from .error_codes import ErrorCodes
 from .reboot_machine import reboot_machine, turn_machine_on
@@ -27,6 +28,7 @@ class PossibleMessages(enum.Enum):
     ERR = "#ERR"
     SDC = "#SDC"
     ABORT = "#ABORT"
+    CMD = "#CMD"
     POWER_CYCLE_REQUEST = "#INF POWER_CYCLE_REQUEST"
     UNKNOWN = "UNKNOWN CONNECTION"
 
@@ -56,7 +58,11 @@ class Machine(threading.Thread):
     # Data receive size in bytes
     __DATA_SIZE = 4096
     # Num of start app tries
-    __MAX_TELNET_TRIES = 4
+    __MAX_LOGIN_TRIES = 4
+    # Default connection_type when a machine config does not specify one, kept for backward compatibility
+    __DEFAULT_CONNECTION_TYPE = "telnet"
+    # Default baud rate for JTAG/serial connections when a machine config does not specify one
+    __DEFAULT_JTAG_BAUDRATE = 115200
     # Max attempts to reboot the device
     __MAX_SEQUENTIALLY_HARD_REBOOTS = 6
     __MAX_SEQUENTIALLY_SOFT_APP_REBOOTS = 3
@@ -104,9 +110,19 @@ class Machine(threading.Thread):
         if "disable_os_soft_reboot" in machine_parameters:
             self.__disable_os_soft_reboot = machine_parameters["disable_os_soft_reboot"] is True
 
+        # Console transport used to log into the DUT and issue commands (telnet or jtag)
+        self.__connection_type = machine_parameters.get("connection_type", self.__DEFAULT_CONNECTION_TYPE)
+        self.__jtag_port = machine_parameters.get("jtag_port")
+        self.__jtag_baudrate = machine_parameters.get("jtag_baudrate", self.__DEFAULT_JTAG_BAUDRATE)
+
         # Factory to manage the command execution
         self.__command_factory = CommandFactory(json_files_list=machine_parameters["json_files"],
                                                 logger_name=logger_name)
+
+        # Dispatcher for commands the DUT itself requests via '#CMD <NAME>' messages
+        self.__command_dispatcher = DUTCommandDispatcher(logger_name=self.__logger_name)
+        self.__command_dispatcher.register(DUTCommand.HARD_REBOOT, self.__on_hard_reboot_command)
+        self.__command_dispatcher.register(DUTCommand.SOFT_REBOOT, self.__on_soft_reboot_command)
 
         self.__dut_log_path = f"{server_log_path}/{self.__dut_hostname}"
         # make sure that the path exists
@@ -163,10 +179,16 @@ class Machine(threading.Thread):
                     self.__hard_reboot_count = 0
 
                 # We need to power cycle the DUT if it requests to do so
+                # (kept as its own message type for backward compatibility with existing DUTs;
+                # it is functionally equivalent to '#CMD HARD_REBOOT')
                 if connection_type == PossibleMessages.POWER_CYCLE_REQUEST:
                     self.__logger.info(f"Power Cycle Request received from {self}")
-                    self.__hard_reboot()
-                    self.__soft_app_reboot(previous_log_end_status=EndStatus.HARD_REBOOT)
+                    self.__command_dispatcher.dispatch(DUTCommand.HARD_REBOOT.value)
+
+                # Generic DUT-requested commands, e.g. '#CMD HARD_REBOOT' or '#CMD SOFT_REBOOT'
+                if connection_type == PossibleMessages.CMD:
+                    raw_command = data_decoded.split(PossibleMessages.CMD.value, 1)[-1].strip()
+                    self.__command_dispatcher.dispatch(raw_command)
 
                 self.__logger.debug(f"{connection_type} - Connection from {self}")
 
@@ -188,26 +210,28 @@ class Machine(threading.Thread):
                 self.__hard_reboot()
                 self.__soft_app_reboot(previous_log_end_status=EndStatus.HARD_REBOOT)
 
-    def __telnet_login(self) -> telnetlib.Telnet:
-        """ Return a telnet session
-        :return:
+    def __on_hard_reboot_command(self, args: str) -> None:
+        """ Handler registered for DUTCommand.HARD_REBOOT: power cycle the DUT and restart the app """
+        self.__hard_reboot()
+        self.__soft_app_reboot(previous_log_end_status=EndStatus.HARD_REBOOT)
+
+    def __on_soft_reboot_command(self, args: str) -> None:
+        """ Handler registered for DUTCommand.SOFT_REBOOT: kill and re-run the app without power cycling """
+        self.__soft_app_reboot(previous_log_end_status=EndStatus.SOFT_APP_REBOOT)
+
+    def __new_dut_connection(self) -> DUTConnection:
+        """ Build a fresh, not-yet-logged-in connection using this machine's configured transport
+        (telnet or jtag, see connection_type in the machine's YAML config) """
+        return create_dut_connection(connection_type=self.__connection_type, username=self.__dut_username,
+                                     password=self.__dut_password, timeout=self.__max_timeout_time,
+                                     logger_name=self.__logger_name, ip=self.__dut_ip,
+                                     jtag_port=self.__jtag_port, jtag_baudrate=self.__jtag_baudrate)
+
+    def __dut_login(self) -> DUTConnection:
+        """ Open a new DUT console connection and perform the login handshake
+        :return: a logged-in DUTConnection
         """
-        tn = telnetlib.Telnet(self.__dut_ip, timeout=self.__max_timeout_time)
-
-        if not tn.read_until(b'ogin: ', timeout=self.__max_timeout_time):
-            raise RuntimeError("Telnet error: Failed to login into Telnet. Could not input username.")
-        tn.write(self.__dut_username.encode('ascii') + b'\n')
-        tn.read_very_eager()
-
-        if not tn.read_until(b'assword: ', timeout=self.__max_timeout_time):
-            raise RuntimeError("Telnet error: Could not login into Telnet. Could not input password.")
-        tn.write(self.__dut_password.encode('ascii') + b'\n')
-
-        if not tn.read_until(b'$ ', timeout=self.__max_timeout_time):
-            raise RuntimeError("Telnet error: Could not login into Telnet. Failed after trying to enter inputs.")
-
-        self.__logger.debug("Successfully logged into Telnet.")
-        return tn
+        return self.__new_dut_connection().login()
 
     def __soft_app_reboot(self, previous_log_end_status: EndStatus = None) -> ErrorCodes:
         """ kill and start an app on the device
@@ -234,12 +258,12 @@ class Machine(threading.Thread):
         # The commands are already encoded
         cmd_line_run, cmd_kill, test_name, header = self.__command_factory.get_commands_and_test_info()
         # try __MAX_START_APP_TRIES times to start the app on the DUT
-        for try_i in range(self.__MAX_TELNET_TRIES):
+        for try_i in range(self.__MAX_LOGIN_TRIES):
             # All loops must stop after the event is set
             if self.__stop_event.is_set():
                 break
             try:
-                with self.__telnet_login() as tn:
+                with self.__dut_login() as tn:
                     # Kill first
                     tn.write(cmd_kill)
                     tn.read_very_eager()
@@ -270,10 +294,10 @@ class Machine(threading.Thread):
                     return ErrorCodes.HOST_UNREACHABLE
             except RuntimeError as e:
                 self.__logger.error(f"{e} {self}")
-                return ErrorCodes.TELNET_CONNECTION_ERROR
+                return ErrorCodes.DUT_CONNECTION_ERROR
             except EOFError:
                 self.__logger.info(f"Command execution not successful TRY:{try_i} on {self}")
-        return ErrorCodes.TELNET_CONNECTION_ERROR
+        return ErrorCodes.DUT_CONNECTION_ERROR
 
     def __wait_for_booting(self):
         current_timestamp = time.time()
@@ -282,19 +306,20 @@ class Machine(threading.Thread):
             # All loops must stop after the event is set
             if self.__stop_event.is_set():
                 break
-            # Pinging the board
+            # Pinging the board (skipped for non-network transports, e.g. jtag, which may have no IP stack up)
             try:
-                subprocess.check_output(["ping", "-c", "1", self.__dut_ip], timeout=self.__BOOT_PING_TIMEOUT)
-                # Try to see if the telnet login is indeed possible
-                tn = self.__telnet_login()
+                if self.__connection_type == "telnet":
+                    subprocess.check_output(["ping", "-c", "1", self.__dut_ip], timeout=self.__BOOT_PING_TIMEOUT)
+                # Try to see if the DUT console login is indeed possible
+                tn = self.__dut_login()
                 tn.close()
-                self.__logger.info(f"Boot ping successful {self}")
+                self.__logger.info(f"Boot successful {self}")
                 return ErrorCodes.SUCCESS
                 # return ErrorCodes.SUCCESS
             except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as e:
                 self.__logger.error(f"Boot ping failed {self} error:{e}")
             except (OSError, EOFError, RuntimeError) as e:
-                self.__logger.error(f"Telnet conn failed {self} error:{e}")
+                self.__logger.error(f"DUT connection failed {self} error:{e}")
                 if isinstance(e, OSError) and e.errno == errno.ECONNREFUSED:
                     # When connection is refused, it crashes instantaneously
                     self.__stop_event.wait(self.__BOOT_PING_TIMEOUT)
@@ -303,7 +328,7 @@ class Machine(threading.Thread):
         return ErrorCodes.HOST_UNREACHABLE
 
     def __soft_os_reboot(self):
-        """ SOFT OS REBOOT: Reboot the operating system, or try to reboot using telnet
+        """ SOFT OS REBOOT: Reboot the operating system, or try to reboot using the DUT console connection
             THE KILL APP WILL MAKE THE LOGGING ENDING BASED ON THE EndStatus
         """
         if self.__stop_event.is_set():
@@ -318,9 +343,9 @@ class Machine(threading.Thread):
 
         self.__logger.info(f"Trying to perform a soft Operating System reboot (OS reboot and run app) on {self}")
         default_os_reboot_cmd = b"sudo /sbin/reboot\r\n"
-        # for try_i in range(self.__MAX_TELNET_TRIES):
+        # for try_i in range(self.__MAX_LOGIN_TRIES):
         try:
-            with self.__telnet_login() as tn:
+            with self.__dut_login() as tn:
                 # OS reboot
                 tn.write(default_os_reboot_cmd)
                 tn.read_very_eager()
@@ -343,7 +368,7 @@ class Machine(threading.Thread):
             if isinstance(e, OSError) and e.errno == errno.EHOSTUNREACH:
                 self.__logger.error(f"Host unreachable {self} ")
                 return ErrorCodes.HOST_UNREACHABLE
-            return ErrorCodes.TELNET_CONNECTION_ERROR
+            return ErrorCodes.DUT_CONNECTION_ERROR
 
     def __hard_reboot(self):
         """ reboot the device based on reboot_machine module
@@ -390,7 +415,7 @@ class Machine(threading.Thread):
         # # Pinging the board
         # try:
         #     subprocess.check_output(["ping", "-c", "1", self.__dut_ip], timeout=self.__BOOT_PING_TIMEOUT)
-        #     with self.__telnet_login() as tn:
+        #     with self.__dut_login() as tn:
         #         # Kill first
         #         tn.write(self.__command_factory.current_command_cmd_kill)
         #         tn.read_very_eager()

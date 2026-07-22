@@ -35,6 +35,17 @@ max_timeout_time: !!int 10
 # Disable the option for OS soft reboot before trying to hard reboot
 disable_os_soft_reboot: !!bool True
 
+# connection_type: transport used to log into the DUT console and issue commands.
+# Supported values: "telnet" (default, used if omitted) or "jtag".
+connection_type: telnet
+
+# jtag_port / jtag_baudrate: only used when connection_type is "jtag". jtag_port is the serial
+# device exposed by the JTAG probe's UART bridge (e.g. an FTDI-based adapter), jtag_baudrate
+# defaults to 115200 if omitted.
+# connection_type: jtag
+# jtag_port: /dev/ttyUSB0
+# jtag_baudrate: !!int 115200
+
 # Json files that contain the commands
 json_files: [
 #  "/home/fernando/git_research/radiation-setup/machines_cfgs/cuda_micro.json",

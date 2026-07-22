@@ -5,8 +5,8 @@ class ErrorCodes(Enum):
     """Error codes used to identify status in this test
     """
     SUCCESS = auto()
-    # When all tries of telnet failed
-    TELNET_CONNECTION_ERROR = auto()
+    # When all tries to connect to the DUT console (telnet or jtag) failed
+    DUT_CONNECTION_ERROR = auto()
     # Codes for RebootMachine
     GENERAL_ERROR = auto()
     HTTP_ERROR = auto()
