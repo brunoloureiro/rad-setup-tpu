@@ -6,6 +6,7 @@ import subprocess
 import telnetlib
 import threading
 import time
+import enum
 from typing import Optional
 
 import yaml
@@ -14,6 +15,32 @@ from .command_factory import CommandFactory
 from .dut_logging import DUTLogging, EndStatus
 from .error_codes import ErrorCodes
 from .reboot_machine import reboot_machine, turn_machine_on
+
+
+class PossibleMessages(enum.Enum):
+    LOGFILE = "#LOGFILE"
+    IT = "#IT"
+    HEADER = "#HEADER"
+    BEGIN = "#BEGIN"
+    END = "#END"
+    INF = "#INF"
+    ERR = "#ERR"
+    SDC = "#SDC"
+    ABORT = "#ABORT"
+    POWER_CYCLE_REQUEST = "#INF POWER_CYCLE_REQUEST"
+    UNKNOWN = "UNKNOWN CONNECTION"
+
+    @classmethod
+    def get_message_type(cls, log_string: str) -> enum.Enum:
+        for m in cls:
+            if m.value in log_string:
+                if m.POWER_CYCLE_REQUEST.value in log_string:
+                    return m.POWER_CYCLE_REQUEST
+                return m
+        return cls.UNKNOWN
+
+    def __str__(self):
+        return str(self.value)
 
 
 class Machine(threading.Thread):
@@ -44,11 +71,6 @@ class Machine(threading.Thread):
     # This time is just to make the OS start the rebooting process;
     # otherwise the next ping will be successful, right after sudo reboot command
     __WAIT_AFTER_SOFT_OS_REBOOT_TIME = 5
-
-    # Possible connection string
-    __ALL_POSSIBLE_CONNECTION_TYPES = [  # Add more if necessary
-        '#IT', '#HEADER', '#BEGIN', '#END', '#INF', '#ERR', "#SDC", "#ABORT"
-    ]
 
     def __init__(self, configuration_file: str, server_ip: str, logger_name: str, server_log_path: str,
                  *args, **kwargs):
@@ -126,24 +148,27 @@ class Machine(threading.Thread):
             try:
                 data, address = self.__messages_socket.recvfrom(self.__DATA_SIZE)
                 self.__dut_logging_obj(message=data)
-                data_decoded = data.decode("ascii")[1:]
-                
-                connection_type_str = "UnknownConn:" + data_decoded[:10]
+                try:
+                    data_decoded = data.decode("ascii")[1:]
+                except UnicodeDecodeError:
+                    data_decoded = "".join(chr(chi) for chi in data[1:])
 
-                for substring in self.__ALL_POSSIBLE_CONNECTION_TYPES:
-                    # It must start from the 1, as the 0 is the ECC defining byte
-                    if data_decoded.startswith(substring):
-                        connection_type_str = substring
-                        break
+                connection_type = PossibleMessages.get_message_type(log_string=data_decoded)
 
                 # TO AVOID making sequential reboot when receiving good data,
                 # This is necessary to fix the behavior when a device keeps crashing for multiple times
                 # in a short period, but eventually comes to life again
-                if connection_type_str == "#IT":
+                if connection_type == PossibleMessages.IT:
                     self.__soft_app_reboot_count = 0
                     self.__hard_reboot_count = 0
 
-                self.__logger.debug(f"{connection_type_str} - Connection from {self}")
+                # We need to power cycle the DUT if it requests to do so
+                if connection_type == PossibleMessages.POWER_CYCLE_REQUEST:
+                    self.__logger.info(f"Power Cycle Request received from {self}")
+                    self.__hard_reboot()
+                    self.__soft_app_reboot(previous_log_end_status=EndStatus.HARD_REBOOT)
+
+                self.__logger.debug(f"{connection_type} - Connection from {self}")
 
                 if self.__command_factory.is_command_window_timed_out:
                     self.__logger.info(

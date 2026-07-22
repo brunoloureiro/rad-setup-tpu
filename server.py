@@ -35,18 +35,11 @@ def __end_daemon_machines():
         machine.stop()
     logger.info("Waiting for all threads to join")
     for machine in MACHINE_LIST:
-        try:
-            machine.join(timeout=THREAD_JOIN_TIMEOUT)
-        except RuntimeError as e:
-            logging.error(f"Error while joining thread: {e}")
+        machine.join(timeout=THREAD_JOIN_TIMEOUT)
 
     if CONSOLE_CURSES_MANAGER is not None:
         CONSOLE_CURSES_MANAGER.stop()
-        try:
-            CONSOLE_CURSES_MANAGER.join()
-        except RuntimeError as e:
-            logging.error(f"Error while joining thread: {e}")
-
+        CONSOLE_CURSES_MANAGER.join()
 
 
 def __machine_thread_exception_handler(args: threading.ExceptHookArgs):
@@ -134,8 +127,6 @@ def main():
         __end_daemon_machines()
         # Unknown exit
         sys.exit(-1)
-
-    print(f"Done. Exiting.")
 
 
 if __name__ == '__main__':
