@@ -46,6 +46,28 @@ connection_type: telnet
 # jtag_port: /dev/ttyUSB0
 # jtag_baudrate: !!int 115200
 
+# dut_mode: how the app is (re)started on this DUT.
+# - "active" (default, used if omitted): an OS-enabled DUT reachable over a console
+#   (connection_type telnet/jtag); the app is (re)started by logging in and issuing kill/run
+#   commands.
+# - "passive": a bare-metal DUT (e.g. FPGA/SoC) with no OS/shell, whose app runs automatically
+#   as soon as it is (re)loaded. Instead of console commands, the app is (re)started by running
+#   'redeploy_cmd' below (soft OS reboot is automatically disabled in this mode, as there is no
+#   OS to reboot).
+# dut_mode: passive
+
+# redeploy_cmd: required when dut_mode is "passive". Command used to (re)load and start the app,
+# e.g. a TCL script driven through a JTAG debugger (Xilinx xsct/xsdb). Either a shell-style
+# string or a YAML list (list form avoids shell quoting/injection concerns and is preferred).
+# redeploy_cmd: ["xsct", "/home/user/scripts/deploy.tcl"]
+
+# redeploy_timeout: max seconds to wait for redeploy_cmd to finish. Defaults to 60 if omitted.
+# redeploy_timeout: !!int 60
+
+# restart_interval: seconds to wait between receiving '#ABORT'/'#END' from the DUT and
+# restarting its app. Defaults to 1.0 if omitted.
+# restart_interval: !!float 1.0
+
 # Json files that contain the commands
 json_files: [
 #  "/home/fernando/git_research/radiation-setup/machines_cfgs/cuda_micro.json",

@@ -8,6 +8,7 @@ from datetime import datetime
 
 class EndStatus(enum.Enum):
     NORMAL_END = "#SERVER_END"
+    ABORTED = "#SERVER_DUE:DUT abort"
     SOFT_APP_REBOOT = "#SERVER_DUE:soft APP reboot"
     SOFT_OS_REBOOT = "#SERVER_DUE:soft OS reboot"
     HARD_REBOOT = "#SERVER_DUE:power cycle"

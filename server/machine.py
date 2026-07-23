@@ -13,6 +13,7 @@ import yaml
 from .command_factory import CommandFactory
 from .dut_commands import DUTCommand, DUTCommandDispatcher
 from .dut_connection import DUTConnection, create_dut_connection
+from .dut_deployment import DEFAULT_REDEPLOY_TIMEOUT, redeploy_dut
 from .dut_logging import DUTLogging, EndStatus
 from .error_codes import ErrorCodes
 from .reboot_machine import reboot_machine, turn_machine_on
@@ -63,6 +64,15 @@ class Machine(threading.Thread):
     __DEFAULT_CONNECTION_TYPE = "telnet"
     # Default baud rate for JTAG/serial connections when a machine config does not specify one
     __DEFAULT_JTAG_BAUDRATE = 115200
+    # Default dut_mode when a machine config does not specify one: an OS-enabled DUT reachable
+    # over a console (telnet/jtag), driven by kill+run commands. "passive" is the bare-metal
+    # counterpart: no console/shell, the app runs automatically once (re)loaded - see
+    # dut_deployment.py.
+    __DEFAULT_DUT_MODE = "active"
+    __SUPPORTED_DUT_MODES = ("active", "passive")
+    # Default delay between receiving a '#ABORT'/'#END' message and restarting the app, unless
+    # overridden per-DUT via 'restart_interval'
+    __DEFAULT_RESTART_INTERVAL = 1.0
     # Max attempts to reboot the device
     __MAX_SEQUENTIALLY_HARD_REBOOTS = 6
     __MAX_SEQUENTIALLY_SOFT_APP_REBOOTS = 3
@@ -114,6 +124,26 @@ class Machine(threading.Thread):
         self.__connection_type = machine_parameters.get("connection_type", self.__DEFAULT_CONNECTION_TYPE)
         self.__jtag_port = machine_parameters.get("jtag_port")
         self.__jtag_baudrate = machine_parameters.get("jtag_baudrate", self.__DEFAULT_JTAG_BAUDRATE)
+
+        # dut_mode selects how the app is (re)started: "active" (default) DUTs run an OS and are
+        # driven by console kill+run commands; "passive" (bare-metal) DUTs have no console/shell
+        # and start their app automatically once it is (re)loaded, via the configured
+        # 'redeploy_cmd' (see dut_deployment.py).
+        self.__dut_mode = machine_parameters.get("dut_mode", self.__DEFAULT_DUT_MODE).lower()
+        if self.__dut_mode not in self.__SUPPORTED_DUT_MODES:
+            raise ValueError(f"Unsupported dut_mode '{self.__dut_mode}', expected one of "
+                             f"{self.__SUPPORTED_DUT_MODES}")
+
+        self.__redeploy_cmd = machine_parameters.get("redeploy_cmd")
+        self.__redeploy_timeout = machine_parameters.get("redeploy_timeout", DEFAULT_REDEPLOY_TIMEOUT)
+        if self.__dut_mode == "passive":
+            if not self.__redeploy_cmd:
+                raise ValueError("dut_mode 'passive' requires 'redeploy_cmd' to be set in the machine config")
+            # Bare-metal DUTs have no OS, so soft OS reboot is not a meaningful escalation step
+            self.__disable_os_soft_reboot = True
+
+        # Delay between receiving '#ABORT'/'#END' and restarting the app, per-DUT configurable
+        self.__restart_interval = machine_parameters.get("restart_interval", self.__DEFAULT_RESTART_INTERVAL)
 
         # Factory to manage the command execution
         self.__command_factory = CommandFactory(json_files_list=machine_parameters["json_files"],
@@ -190,6 +220,18 @@ class Machine(threading.Thread):
                     raw_command = data_decoded.split(PossibleMessages.CMD.value, 1)[-1].strip()
                     self.__command_dispatcher.dispatch(raw_command)
 
+                # The benchmark reported it stopped (normally or via an abort) - restart it quickly
+                # rather than waiting for the socket to time out. previous_log_end_status records
+                # which of the two it was; __soft_app_reboot picks the active (console kill+run) or
+                # passive (redeploy_cmd) restart path based on this DUT's configured dut_mode.
+                if connection_type in (PossibleMessages.ABORT, PossibleMessages.END):
+                    self.__logger.info(f"{connection_type} received from {self}, restarting the app "
+                                       f"in {self.__restart_interval}s")
+                    self.__stop_event.wait(self.__restart_interval)
+                    end_status = EndStatus.ABORTED if connection_type == PossibleMessages.ABORT \
+                        else EndStatus.NORMAL_END
+                    self.__soft_app_reboot(previous_log_end_status=end_status)
+
                 self.__logger.debug(f"{connection_type} - Connection from {self}")
 
                 if self.__command_factory.is_command_window_timed_out:
@@ -216,7 +258,8 @@ class Machine(threading.Thread):
         self.__soft_app_reboot(previous_log_end_status=EndStatus.HARD_REBOOT)
 
     def __on_soft_reboot_command(self, args: str) -> None:
-        """ Handler registered for DUTCommand.SOFT_REBOOT: kill and re-run the app without power cycling """
+        """ Handler registered for DUTCommand.SOFT_REBOOT: restart the app without power cycling
+        (console kill+run for active DUTs, redeploy_cmd for passive ones) """
         self.__soft_app_reboot(previous_log_end_status=EndStatus.SOFT_APP_REBOOT)
 
     def __new_dut_connection(self) -> DUTConnection:
@@ -234,7 +277,10 @@ class Machine(threading.Thread):
         return self.__new_dut_connection().login()
 
     def __soft_app_reboot(self, previous_log_end_status: EndStatus = None) -> ErrorCodes:
-        """ kill and start an app on the device
+        """ (Re)start the app on the device: for 'active' DUTs this kills and re-runs the current
+        benchmark over the console connection (telnet/jtag); for 'passive' (bare-metal) DUTs,
+        which start their app automatically as soon as it is loaded, this instead runs the
+        configured 'redeploy_cmd' to reload/reset it (see dut_deployment.py).
         :previous_log_end_status: if it is not the first time that the device will run an app,
         then pass the end_status, otherwise leave it None
         :return: If the start was successful or not
@@ -251,12 +297,16 @@ class Machine(threading.Thread):
             self.__logger.info(f"MAXIMUM_APP_REBOOT_REACHED on {self}")
             return ErrorCodes.MAXIMUM_APP_REBOOT_REACHED
 
-        # First check if there is an app running
-        self.__logger.info(f"TRYING SOFT APP REBOOT (app kill and run again/start first time) on {self}")
-
         # self.__command_factory produces the commands that will be executed
         # The commands are already encoded
         cmd_line_run, cmd_kill, test_name, header = self.__command_factory.get_commands_and_test_info()
+
+        if self.__dut_mode == "passive":
+            return self.__passive_redeploy(test_name=test_name, header=header,
+                                           previous_log_end_status=previous_log_end_status)
+
+        # First check if there is an app running
+        self.__logger.info(f"TRYING SOFT APP REBOOT (app kill and run again/start first time) on {self}")
         # try __MAX_START_APP_TRIES times to start the app on the DUT
         for try_i in range(self.__MAX_LOGIN_TRIES):
             # All loops must stop after the event is set
@@ -299,7 +349,38 @@ class Machine(threading.Thread):
                 self.__logger.info(f"Command execution not successful TRY:{try_i} on {self}")
         return ErrorCodes.DUT_CONNECTION_ERROR
 
+    def __passive_redeploy(self, test_name: str, header: str,
+                           previous_log_end_status: EndStatus) -> ErrorCodes:
+        """ Passive/bare-metal counterpart of the active-mode console kill+run cycle above: run
+        this DUT's configured 'redeploy_cmd' instead of logging into a console, then roll the
+        DUTLogging file the same way the active path does.
+        """
+        self.__logger.info(f"TRYING REDEPLOY (redeploy_cmd, no console) on {self}")
+        redeploy_status = redeploy_dut(redeploy_cmd=self.__redeploy_cmd, logger_name=self.__logger_name,
+                                       timeout=self.__redeploy_timeout)
+        if redeploy_status != ErrorCodes.SUCCESS:
+            return redeploy_status
+
+        self.__logger.info(f"SUCCESSFULLY REDEPLOYED APP COUNTER:{self.__soft_app_reboot_count} on {self}")
+        # Close the DUTLogging only if there is a log file open
+        if self.__dut_logging_obj:
+            self.__dut_logging_obj.finish_this_dut_log(end_status=previous_log_end_status)
+        # Delete the current dut logging obj
+        del self.__dut_logging_obj
+        self.__dut_logging_obj = DUTLogging(log_dir=self.__dut_log_path, test_name=test_name, test_header=header,
+                                            hostname=self.__dut_hostname, logger_name=self.__logger_name)
+        self.__soft_app_reboot_count += 1
+        return ErrorCodes.SUCCESS
+
     def __wait_for_booting(self):
+        if self.__dut_mode == "passive":
+            # Passive/bare-metal DUTs have no console/shell to probe for readiness - just wait
+            # out boot_waiting_time. The app itself is (re)loaded right after this call returns,
+            # by __soft_app_reboot's redeploy_cmd step.
+            self.__stop_event.wait(self.__boot_waiting_time)
+            self.__logger.info(f"Boot wait finished (passive DUT) {self}")
+            return ErrorCodes.SUCCESS
+
         current_timestamp = time.time()
         start_timestamp = current_timestamp
         while (current_timestamp - start_timestamp) <= self.__boot_waiting_time:
