@@ -210,6 +210,9 @@ class Machine(threading.Thread):
         self.__command_dispatcher = DUTCommandDispatcher(logger_name=self.__logger_name)
         self.__command_dispatcher.register(DUTCommand.HARD_REBOOT, self.__on_hard_reboot_command)
         self.__command_dispatcher.register(DUTCommand.SOFT_REBOOT, self.__on_soft_reboot_command)
+        # Stubs only for now - see README.md, "DUT-requested commands"
+        self.__command_dispatcher.register(DUTCommand.OPEN_BEAM, self.__on_open_beam_command)
+        self.__command_dispatcher.register(DUTCommand.CLOSE_BEAM, self.__on_close_beam_command)
 
         self.__dut_log_path = f"{server_log_path}/{self.__dut_hostname}"
         # make sure that the path exists
@@ -261,9 +264,9 @@ class Machine(threading.Thread):
                 data = self.__message_channel.receive()
                 self.__dut_logging_obj(message=data)
                 try:
-                    data_decoded = data.decode("ascii")[1:]
+                    data_decoded = data.decode("ascii")
                 except UnicodeDecodeError:
-                    data_decoded = "".join(chr(chi) for chi in data[1:])
+                    data_decoded = "".join(chr(chi) for chi in data)
 
                 message_type = PossibleMessages.get_message_type(log_string=data_decoded)
 
@@ -327,6 +330,14 @@ class Machine(threading.Thread):
         """ Handler registered for DUTCommand.SOFT_REBOOT: restart the app without power cycling
         (console kill+run for active DUTs, redeploy_cmd for passive ones) """
         self.__soft_app_reboot(previous_log_end_status=EndStatus.SOFT_APP_REBOOT)
+
+    def __on_open_beam_command(self, args: str) -> None:
+        """ Stub handler registered for DUTCommand.OPEN_BEAM - see README.md, "DUT-requested commands" """
+        self.__logger.info(f"OPEN_BEAM received (not yet implemented) args='{args}' on {self}")
+
+    def __on_close_beam_command(self, args: str) -> None:
+        """ Stub handler registered for DUTCommand.CLOSE_BEAM - see README.md, "DUT-requested commands" """
+        self.__logger.info(f"CLOSE_BEAM received (not yet implemented) args='{args}' on {self}")
 
     def __new_dut_connection(self) -> DUTConnection:
         """ Build a fresh, not-yet-logged-in Telnet console connection for this (active) DUT """

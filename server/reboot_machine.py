@@ -24,6 +24,12 @@ __OFF = "OFF"
 # Make sure that everything here is thread safe
 __GLOBAL_LOCK = threading.Lock()
 
+# Timeout (seconds) for the Lindy switch's HTTP request. Without this, an unreachable/offline
+# switch hangs the calling thread for the OS-level TCP connect timeout (a couple of minutes) -
+# since turn_machine_on/reboot_machine run synchronously at the top of Machine.run(), that blocks
+# the entire per-DUT thread (redeploy, message receive, everything) until it gives up.
+__LINDY_REQUEST_TIMEOUT = 10
+
 # Check if curl is available
 try:
     subprocess.call(["curl", "--help"], stdout=subprocess.PIPE)
@@ -67,7 +73,8 @@ def _lindy_switch(status: str, switch_port: int, switch_ip: str, logger: logging
     # print(headers)
     default_string = "Could not change Lindy IP switch status, portNumber:"
     try:
-        requests_status = requests.post(url, data=json.dumps(payload), headers=headers)
+        requests_status = requests.post(url, data=json.dumps(payload), headers=headers,
+                                        timeout=__LINDY_REQUEST_TIMEOUT)
         requests_status.raise_for_status()
         reboot_status = ErrorCodes.SUCCESS
     except requests.exceptions.HTTPError as http_error:

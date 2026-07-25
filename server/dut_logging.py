@@ -42,12 +42,12 @@ class DUTLogging:
         # Create the file when the first message arrives
         self.__filename = None
 
-    def __create_file_if_does_not_exist(self, ecc_status: str):
+    def __create_file_if_does_not_exist(self):
         if self.__filename is None:
-            # log example: 2021_11_15_22_08_25_cuda_trip_half_lava_ECC_OFF_fernando.log
+            # log example: 2021_11_15_22_08_25_cuda_trip_half_lava_fernando.log
             date = datetime.today()
             date_fmt = date.strftime('%Y_%m_%d_%H_%M_%S')
-            log_filename = f"{self.__log_dir}/{date_fmt}_{self.__test_name}_ECC_{ecc_status}_{self.__hostname}.log"
+            log_filename = f"{self.__log_dir}/{date_fmt}_{self.__test_name}_{self.__hostname}.log"
             # Writing the header to the file
             try:
                 with open(log_filename, "w") as log_file:
@@ -61,21 +61,13 @@ class DUTLogging:
 
     def __call__(self, message: bytes, *args, **kwargs) -> None:
         """ Log a message from the DUT
-        :param message: a message is composed of
-        <first byte ecc status>
-        On file_writer defined as:
-        #define ECC_ENABLED 0xE
-        #define ECC_DISABLED 0xD
-        <message of maximum 1023 bytes>
-        1 byte for ecc + 1023 maximum message content = 1024 bytes
+        :param message: an ASCII-encoded message, maximum 1023 bytes
         """
-        ecc_values = {0xD: "OFF", 0xE: "ON"}
-        ecc_status = ecc_values[message[0]]
-        self.__create_file_if_does_not_exist(ecc_status=ecc_status)
+        self.__create_file_if_does_not_exist()
         try:
-            message_content = message[1:].decode("ascii")
+            message_content = message.decode("ascii")
         except UnicodeDecodeError as exception_error:
-            message_content = "".join(chr(chi) for chi in message[1:])
+            message_content = "".join(chr(chi) for chi in message)
 
         if self.__filename:
             with open(self.__filename, "a") as log_file:

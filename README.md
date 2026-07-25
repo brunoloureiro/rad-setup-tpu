@@ -202,8 +202,8 @@ Example:
 ### DUT-requested commands
 
 A DUT can ask the server to perform an action at any time by sending a message (over whichever
-`connection_type` is configured - UDP or JTAG serial) whose payload (after the leading ECC status
-byte) starts with `#CMD`, followed by the command name:
+`connection_type` is configured - UDP or JTAG serial) whose payload starts with `#CMD`, followed by
+the command name:
 
 ```
 #CMD HARD_REBOOT
@@ -216,6 +216,14 @@ Supported commands:
 |---------------|----------------------------------------------------------------------|
 | `HARD_REBOOT` | Power cycle the DUT through its power switch, then restart the benchmark |
 | `SOFT_REBOOT` | Kill and re-run the current benchmark, without power cycling the DUT |
+| `OPEN_BEAM`   | **Stub only** - currently just logs that the command was received, no action taken yet |
+| `CLOSE_BEAM`  | **Stub only** - currently just logs that the command was received, no action taken yet |
+
+`OPEN_BEAM`/`CLOSE_BEAM` are sent by some DUT firmwares (e.g. the Versal bare-metal app) to signal
+a beam-on/beam-off window. The server currently only logs these (`server/machine.py`'s
+`__on_open_beam_command`/`__on_close_beam_command`) - real handling (e.g. tagging DUT logs with the
+beam window, or driving experiment bookkeeping off of it) is not implemented yet and is intended to
+be completed at a later date.
 
 Commands are dispatched through `server/dut_commands.py`'s `DUTCommandDispatcher`. Adding a new
 one only requires adding a member to the `DUTCommand` enum and registering a handler for it in

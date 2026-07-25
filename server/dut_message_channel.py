@@ -11,10 +11,8 @@ Two transports:
   Used when the DUT has a working network stack and libLogHelper sends its messages over UDP.
 - JTAGMessageChannel: the JTAG probe's serial/UART bridge (jtag_port), for DUTs with no network
   stack at all (e.g. a bare-metal board driven purely over JTAG). Messages are framed by
-  newlines: each line is treated as one '<ecc status byte><ascii text>' message, the same wire
-  format libLogHelper uses per UDP datagram (see dut_logging.py) - i.e. the DUT is expected to
-  write one message per line to its UART (ending in '\\n'), with the ECC status byte as the first
-  byte of that line.
+  newlines: each line is treated as one ASCII-text message - i.e. the DUT is expected to write one
+  message per line to its UART (ending in '\\n').
 
 Both raise TimeoutError if no message arrives within the configured timeout, so Machine.run()'s
 receive loop can treat them identically regardless of which transport is configured.
