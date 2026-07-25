@@ -2,7 +2,7 @@
 # No more magic paths and numbers
 
 # IP of the remote socket server (hardware watchdog)
-server_ip: 192.168.1.5
+server_ip: 127.0.0.1
 
 # log in whatever path you are executing this script
 server_log_file: server.log
@@ -16,7 +16,7 @@ server_log_store_dir: logs/
 machines: [
   # The server will check this machine
   {
-    "enabled": True, "cfg_file": "machines_cfgs/carolk401.yaml"
+    "enabled": True, "cfg_file": "machines_cfgs/versal_bm_jtag_passive.yaml"
   },
   # The server will not check this machine
   {

@@ -15,6 +15,7 @@ handshake do not need to change.
 """
 import abc
 import logging
+import os
 import time
 import typing
 
@@ -88,7 +89,13 @@ class TelnetDUTConnection(DUTConnection):
 
     def open(self) -> None:
         import telnetlib
-        self.__telnet = telnetlib.Telnet(self.__ip, timeout=self._timeout)
+        self._logger.info(f"Opening Telnet connection to {self.__ip} (timeout={self._timeout}s)")
+        try:
+            self.__telnet = telnetlib.Telnet(self.__ip, timeout=self._timeout)
+        except OSError as e:
+            self._logger.error(f"Failed to open Telnet connection to {self.__ip}: {e}")
+            raise
+        self._logger.debug(f"Telnet connection to {self.__ip} opened")
 
     def write(self, data: bytes) -> None:
         self.__telnet.write(data)
@@ -117,8 +124,26 @@ class JTAGDUTConnection(DUTConnection):
 
     def open(self) -> None:
         import serial
-        self.__serial = serial.Serial(port=self.__port, baudrate=self.__baudrate, timeout=self._timeout)
+        self._logger.info(f"Opening JTAG serial connection on port={self.__port} baudrate={self.__baudrate}")
+
+        # pyserial's own error for a missing device is accurate but easy to miss buried in a
+        # traceback/retry loop; check up front so a wrong/unplugged jtag_port is unmistakable in
+        # the logs instead of just causing repeated silent connection retries.
+        if not os.path.exists(self.__port):
+            self._logger.error(
+                f"JTAG serial port {self.__port} does not exist. Check that the JTAG probe/UART "
+                f"adapter is plugged in, that 'jtag_port' in the machine config matches the actual "
+                f"device (see 'ls /dev/ttyUSB*' or 'ls /dev/ttyACM*' on the server host), and that "
+                f"the server has permission to access it (e.g. dialout group).")
+            raise serial.SerialException(f"JTAG serial port {self.__port} not found")
+
+        try:
+            self.__serial = serial.Serial(port=self.__port, baudrate=self.__baudrate, timeout=self._timeout)
+        except serial.SerialException as e:
+            self._logger.error(f"Failed to open JTAG serial port {self.__port}: {e}")
+            raise
         self.__buffer = b""
+        self._logger.info(f"JTAG serial connection opened on {self.__port}")
 
     def write(self, data: bytes) -> None:
         self.__serial.write(data)

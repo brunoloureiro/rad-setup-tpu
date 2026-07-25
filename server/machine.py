@@ -236,7 +236,10 @@ class Machine(threading.Thread):
             self.__logger.error(f"Failed to turn ON the {self}")
 
         # Wait and start the app for the first time
-        self.__wait_for_booting()
+        boot_status = self.__wait_for_booting()
+        if boot_status != ErrorCodes.SUCCESS:
+            self.__logger.warning(f"Initial boot check did not succeed ({boot_status}) on {self}, "
+                                  f"proceeding to (re)start the app anyway")
         self.__soft_app_reboot()
         while self.__stop_event.is_set() is False:
             try:
@@ -392,8 +395,8 @@ class Machine(threading.Thread):
                 self.__soft_app_reboot_count += 1
                 return ErrorCodes.SUCCESS
             except OSError as e:
+                self.__logger.error(f"DUT connection failed TRY:{try_i} on {self} error:{e}")
                 if e.errno == errno.EHOSTUNREACH:
-                    self.__logger.error(f"Host unreachable {self} ")
                     return ErrorCodes.HOST_UNREACHABLE
             except RuntimeError as e:
                 self.__logger.error(f"{e} {self}")
@@ -491,7 +494,9 @@ class Machine(threading.Thread):
             # otherwise the next ping will be successful, right after sudo reboot command
             self.__stop_event.wait(self.__WAIT_AFTER_SOFT_OS_REBOOT_TIME)
             # Wait the machine to boot
-            self.__wait_for_booting()
+            boot_status = self.__wait_for_booting()
+            if boot_status != ErrorCodes.SUCCESS:
+                self.__logger.warning(f"Post-OS-reboot boot check did not succeed ({boot_status}) on {self}")
             # Reset the soft app reboot as the system will be rebooted
             self.__soft_app_reboot_count = 0
             self.__soft_os_reboot_count += 1
@@ -536,7 +541,9 @@ class Machine(threading.Thread):
         else:
             self.__logger.info(reboot_msg + " finished.")
         # Wait the machine to boot
-        self.__wait_for_booting()
+        boot_status = self.__wait_for_booting()
+        if boot_status != ErrorCodes.SUCCESS:
+            self.__logger.warning(f"Post-hard-reboot boot check did not succeed ({boot_status}) on {self}")
         # Reset the soft app and the soft os reboot as the system will be hard rebooted
         self.__soft_app_reboot_count = 0
         self.__soft_os_reboot_count = 0

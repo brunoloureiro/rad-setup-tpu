@@ -34,15 +34,48 @@ HW_SERVER="${HW_SERVER:-localhost:3121}"
 
 : "${PDI_PATH:?PDI_PATH must be set in the environment}"
 
+# Fields coming straight from the machine YAML (PDI_PATH/ELF_PATH) or the pull_versal_scripts.sh
+# subtree (debug.tcl/deploy.tcl) are otherwise only discovered to be wrong deep inside an xsdb
+# TCL error - check them up front so a typo'd path or an un-pulled subtree fails fast and clearly.
+if [ ! -f "$PDI_PATH" ]; then
+    echo "ERROR: PDI_PATH '$PDI_PATH' does not exist or is not a file (check the 'redeploy_cmd' PDI_PATH entry in this DUT's machine config)." >&2
+    exit 1
+fi
+
+if [ -n "${ELF_PATH:-}" ] && [ ! -f "$ELF_PATH" ]; then
+    echo "ERROR: ELF_PATH '$ELF_PATH' does not exist or is not a file (check the 'redeploy_cmd' ELF_PATH entry in this DUT's machine config)." >&2
+    exit 1
+fi
+
+for tcl_script in "$VERSAL_SCRIPTS_DIR/debug.tcl" "$VERSAL_SCRIPTS_DIR/deploy.tcl"; do
+    if [ ! -f "$tcl_script" ]; then
+        echo "ERROR: expected TCL script not found: $tcl_script (has 'versal_scripts' been pulled? see pull_versal_scripts.sh)" >&2
+        exit 1
+    fi
+done
+
 if ! command -v xsdb >/dev/null 2>&1; then
     echo "ERROR: xsdb not found on PATH. Source the Vitis toolchain environment before running server.py (e.g. 'source ~/source_vitis.sh')." >&2
     exit 1
 fi
 
-echo ">>> Switching board to JTAG boot mode (debug.tcl)"
+hw_server_host="${HW_SERVER%%:*}"
+hw_server_port="${HW_SERVER##*:}"
+if ! timeout 3 bash -c "echo > /dev/tcp/${hw_server_host}/${hw_server_port}" 2>/dev/null; then
+    echo "ERROR: cannot reach hw_server at ${HW_SERVER}. Is it running (e.g. 'hw_server' from the Vitis/Vivado install) and is the JTAG probe connected to it?" >&2
+    exit 1
+fi
+echo ">>> hw_server reachable at ${HW_SERVER}"
+echo ">>> PDI_PATH=${PDI_PATH}"
+echo ">>> ELF_PATH=${ELF_PATH:-<unset, ELF assumed embedded in PDI>}"
+
+echo ">>> [1/2] Switching board to JTAG boot mode (debug.tcl)"
 TERM=vt100 xsdb -eval "connect -url TCP:${HW_SERVER}; source ${VERSAL_SCRIPTS_DIR}/debug.tcl"
+echo ">>> [1/2] Boot mode switch done"
 
 sleep 5
 
-echo ">>> Loading PDI/ELF (deploy.tcl)"
+echo ">>> [2/2] Loading PDI/ELF (deploy.tcl)"
 TERM=vt100 xsdb -eval "connect -url TCP:${HW_SERVER}; source ${VERSAL_SCRIPTS_DIR}/deploy.tcl"
+echo ">>> [2/2] PDI/ELF load done"
+echo ">>> Redeploy finished successfully"
