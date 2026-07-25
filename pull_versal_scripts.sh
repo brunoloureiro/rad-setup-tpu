@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Pulls the latest scripts/ subdirectory from the versal_aie repo
-# (https://github.com/brunoloureiro/versal_aie) into machine_cfgs/versal_scripts,
+# (https://github.com/brunoloureiro/versal_aie) into machines_cfgs/versal_scripts,
 # as a git-subtree (see: git help subtree).
 #
 # Usage: ./pull_versal_scripts.sh
@@ -13,7 +13,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 
 REMOTE_URL=https://github.com/brunoloureiro/versal_aie.git
 REMOTE_BRANCH=main
-PREFIX=machine_cfgs/versal_scripts
+PREFIX=machines_cfgs/versal_scripts
 SOURCE_SUBDIR=scripts
 SPLIT_BRANCH=tmp-versal-scripts-split
 
