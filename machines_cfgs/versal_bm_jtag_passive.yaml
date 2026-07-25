@@ -57,19 +57,25 @@ dut_mode: passive
 # e.g. a TCL script driven through a JTAG debugger (Xilinx xsct/xsdb). Either a shell-style
 # string or a YAML list (list form avoids shell quoting/injection concerns and is preferred).
 #
-# deploy.tcl requires PDI_PATH (and optionally ELF_PATH) to be set in the child process
-# environment; these are set here via the 'env' utility rather than a shell, so no shell
-# invocation/quoting is involved.
+# deploy_versal_jtag.sh mirrors versal-aie-dev's `make deploy` (see that repo's Makefile,
+# 'deploy'/'_post_bsp_deploy' targets): it switches the board to JTAG boot mode and resets it
+# (debug.tcl), then loads PDI_PATH (and optionally ELF_PATH) via deploy.tcl. Both steps run on
+# every redeploy since the JTAG boot mode does not survive a power cycle. PDI_PATH/ELF_PATH are
+# set here via the 'env' utility rather than a shell, so no shell invocation/quoting is involved.
+# This requires the Vitis toolchain environment (xsdb on PATH) to already be sourced before
+# server.py is started - see /home/loureiro/source_vitis.sh.
 redeploy_cmd: [
     "env",
     "PDI_PATH=/home/loureiro/repos/radiation-setup-jtag/machines_cfgs/versal_files/versal_bm_jtag.pdi",
     "ELF_PATH=/home/loureiro/repos/radiation-setup-jtag/machines_cfgs/versal_files/versal_bm_jtag.elf",
-    "xsct",
-    "/home/loureiro/repos/radiation-setup-jtag/machines_cfgs/versal_scripts/deploy.tcl",
+    "/home/loureiro/repos/radiation-setup-jtag/machines_cfgs/deploy_versal_jtag.sh",
 ]
 
 # redeploy_timeout: max seconds to wait for redeploy_cmd to finish. Defaults to 60 if omitted.
-redeploy_timeout: !!int 15
+# Bumped from the old single-step deploy.tcl-only value: the wrapper script now also runs
+# debug.tcl first (JTAG boot mode switch + PMC reset) plus a mandatory 5s settle before
+# deploy.tcl, and PDI programming itself can take a while.
+redeploy_timeout: !!int 90
 
 # restart_interval: seconds to wait between receiving '#ABORT'/'#END' from the DUT and
 # restarting its app. Defaults to 1.0 if omitted.
