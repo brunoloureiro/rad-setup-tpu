@@ -6,10 +6,33 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `radiation-setup` is the Python server component of the RADHelper framework. It runs outside a
 beam room during radiation experiments, coordinating one or more Devices Under Test (DUTs). For
-each DUT it: powers the device on via a network power switch, starts a benchmark over a console
-connection (Telnet, or a JTAG probe's serial/UART bridge), listens for UDP log/status messages from
-the DUT (sent by the `libLogHelper` client library), and reboots the device (soft app restart, soft
-OS reboot, or hard power cycle) when it stops responding or requests one.
+each DUT it: powers the device on via a network power switch, (re)starts its application, listens
+for status/log messages from the DUT (sent by the `libLogHelper` client library), and reboots the
+device (soft app restart, soft OS reboot, or hard power cycle) when it stops responding or requests
+one.
+
+Each DUT is configured along **two independent axes** (both per-DUT YAML fields, see "Config
+files" below):
+
+- **`dut_mode`: `active` vs `passive`** — how the app is (re)started.
+  - `active` (default): the DUT runs an OS/shell. The server logs into it over **Telnet** (`ip`,
+    `username`, `password` in the DUT's YAML) and issues kill/run commands (from the JSON files
+    listed in `json_files`). See "Machine lifecycle" and "DUT console connection" below.
+  - `passive`: the DUT is bare-metal (no OS/shell). The server runs a local command (`redeploy_cmd`
+    in the DUT's YAML, e.g. a TCL script driven through a JTAG debugger) to (re)load and start the
+    app. See "Passive DUT deployment" below.
+- **`connection_type`: `ethernet` vs `jtag`** — how the server *listens for DUT status/log
+  messages* (`#IT`, `#LOGFILE`, `#CMD`, ...).
+  - `ethernet` (default): a UDP socket bound to `server_ip:receive_port`, requires the DUT to have
+    a working network stack pointed at this server.
+  - `jtag`: the JTAG probe's serial/UART bridge (`jtag_port`/`jtag_baudrate` in the DUT's YAML),
+    for DUTs with no network stack at all. See "DUT message channel" below.
+
+These two axes are orthogonal — e.g. a `passive` bare-metal DUT can report status over `ethernet`
+if it happens to have a network stack (`machines_cfgs/versal_bm_eth_passive.yaml`) or over `jtag`
+if it doesn't (`machines_cfgs/versal_bm_jtag_passive.yaml`); an `active` OS-based DUT almost always
+uses `ethernet`, since it has a network stack for Telnet anyway. There is currently no config that
+pairs `active` with `jtag`, but nothing in `Machine` assumes otherwise.
 
 ## Running
 
@@ -46,30 +69,38 @@ when changing shared logic, reason about correctness directly rather than trusti
 
 `server.py:main` reads `server_parameters.yaml`, then spawns one `Machine` thread
 (`server/machine.py`) per enabled entry under `machines`. Each `Machine` is a `threading.Thread`
-that owns a UDP socket bound to `server_ip:receive_port` and runs an independent state machine for
-exactly one DUT — machines never share state. `threading.excepthook` is overridden so that if any
-Machine thread dies uncaught, the whole server logs it and exits (`__machine_thread_exception_handler`
-in `server.py`); a SIGINT handler does an orderly shutdown of all machines via `Machine.stop()`
-(sets a `threading.Event`) followed by `join()`.
+that owns a `MessageChannel` (a UDP socket or a JTAG serial port, see "DUT message channel" below)
+and runs an independent state machine for exactly one DUT — machines never share state.
+`threading.excepthook` is overridden so that if any Machine thread dies uncaught, the whole server
+logs it and exits (`__machine_thread_exception_handler` in `server.py`); a SIGINT handler does an
+orderly shutdown of all machines via `Machine.stop()` (sets a `threading.Event`, closes the message
+channel) followed by `join()`.
 
 ### Machine lifecycle (`server/machine.py`)
 
 `Machine.run()` is the core loop:
-1. Power the DUT on (`reboot_machine.turn_machine_on`), then poll via ping (skipped for non-network
-   transports) + console login until it boots (`__wait_for_booting`).
-2. Start the current benchmark over the console connection (`__soft_app_reboot`), which also opens
-   a new `DUTLogging` file for the run.
-3. Loop on `recvfrom` with a timeout (`max_timeout_time` from the machine's YAML config). Every
-   received UDP datagram is: (a) appended to the current `DUTLogging` file, and (b) classified via
-   `PossibleMessages.get_message_type` (a `#LOGFILE`/`#IT`/`#HEADER`/`#BEGIN`/`#END`/`#INF`/`#ERR`/
-   `#SDC`/`#ABORT`/`#CMD`/`#INF POWER_CYCLE_REQUEST` prefix protocol shared with `libLogHelper`).
-4. On socket timeout, escalate through three levels with per-level retry counters that reset when
-   good data (`#IT`) arrives: soft app reboot -> soft OS reboot (skippable via
-   `disable_os_soft_reboot` in the machine config) -> hard power cycle. A `#INF POWER_CYCLE_REQUEST`
-   message forces an immediate hard reboot regardless of timeout state; a `#CMD <NAME>` message runs
-   whatever the DUT asked for (see DUT commands below).
+1. Power the DUT on (`reboot_machine.turn_machine_on`), then wait for it to be ready
+   (`__wait_for_booting`): for `dut_mode: active` this polls via ping + Telnet console login; for
+   `dut_mode: passive` this returns immediately (no console to probe, and `redeploy_cmd` performs
+   any board-specific settle waits itself — see "Passive DUT deployment" below).
+2. (Re)start the app for the first time (`__soft_app_reboot`): Telnet kill+run commands for
+   `active` DUTs, or `redeploy_cmd` for `passive` ones (`__passive_redeploy`). Either way this also
+   opens a new `DUTLogging` file for the run.
+3. Loop on `self.__message_channel.receive()` with a timeout (`max_timeout_time` from the
+   machine's YAML config) — a UDP `recvfrom` or a JTAG serial read depending on `connection_type`,
+   see "DUT message channel" below. Every received message is: (a) appended to the current
+   `DUTLogging` file, and (b) classified via `PossibleMessages.get_message_type` (a
+   `#LOGFILE`/`#IT`/`#HEADER`/`#BEGIN`/`#END`/`#INF`/`#ERR`/`#SDC`/`#ABORT`/`#CMD`/
+   `#INF POWER_CYCLE_REQUEST` prefix protocol shared with `libLogHelper`).
+4. On a `MessageChannel.receive()` timeout, escalate through three levels with per-level retry
+   counters that reset when good data (`#IT`) arrives: soft app reboot -> soft OS reboot (skippable
+   via `disable_os_soft_reboot`, and always disabled for `passive` DUTs since there is no OS) ->
+   hard power cycle. A `#INF POWER_CYCLE_REQUEST` message forces an immediate hard reboot
+   regardless of timeout state; a `#CMD <NAME>` message runs whatever the DUT asked for (see DUT
+   commands below).
 5. `CommandFactory.is_command_window_timed_out` is also checked on every received message so a
-   benchmark that runs longer than its configured window gets restarted even without a timeout.
+   benchmark that runs longer than its configured window gets restarted even without a timeout
+   (only applies when `json_files` is configured — see "Config files" below).
 
 Reboot counters (`__soft_app_reboot_count`, `__soft_os_reboot_count`, `__hard_reboot_count`) are
 reset at different points intentionally (e.g. a hard reboot resets both soft counters) — this
@@ -81,29 +112,69 @@ use `self.__stop_event.wait(seconds)` instead (existing code follows this conven
 
 ### DUT console connection (`server/dut_connection.py`)
 
-`Machine` talks to a DUT's console through a `DUTConnection`, an abstraction with two
+`Machine` talks to an `active`-mode DUT's console through a `DUTConnection` abstraction — currently
+only `TelnetDUTConnection` (network Telnet), built on four raw I/O primitives
+(`open`/`write`/`read_until`/`read_very_eager`/`close`); the login handshake (username/password/
+shell prompts) is implemented once in `DUTConnection.login()`. `Machine.__dut_login()` builds a
+fresh connection via `create_dut_connection(...)` and logs in. Console access is always Telnet
+regardless of `connection_type` (that field only selects the message-listening transport, see
+below) — adding a second console transport (e.g. SSH) means implementing `DUTConnection`'s four
+primitives and updating `create_dut_connection`; nothing else in `Machine` changes.
+
+### DUT message channel (`server/dut_message_channel.py`)
+
+`Machine` listens for DUT status/log messages through a `MessageChannel` abstraction with two
 implementations selected per-machine by the `connection_type` field in that DUT's YAML config
-(`"telnet"`, the default, or `"jtag"`): `TelnetDUTConnection` (network Telnet, the original
-behavior) and `JTAGDUTConnection` (serial console over a JTAG probe's UART bridge, via `pyserial`;
-config fields `jtag_port` and optional `jtag_baudrate`). Both are driven through the same four raw
-I/O primitives (`open`/`write`/`read_until`/`read_very_eager`/`close`); the login handshake
-(username/password/shell prompts) is transport-agnostic and implemented once in
-`DUTConnection.login()`. `Machine.__dut_login()` builds a fresh connection via
-`create_dut_connection(...)` and logs in — every call site that used to talk to `telnetlib`
-directly now goes through this interface, so IP-based and JTAG-based DUTs are otherwise driven by
-identical `Machine` code (same YAML schema, one machine config file per DUT either way, only the
-connection-specific fields differ). Adding a third transport means implementing `DUTConnection`'s
-four primitives and adding a branch in `create_dut_connection`; nothing else changes.
+(`"ethernet"`, the default, or `"jtag"`): `EthernetMessageChannel` (a UDP socket bound to
+`server_ip:receive_port`, the original behavior) and `JTAGMessageChannel` (reads the JTAG probe's
+serial/UART bridge, via `pyserial`; config fields `jtag_port` and optional `jtag_baudrate`).
+`JTAGMessageChannel` frames messages by splitting the serial byte stream on `\n` — it expects the
+DUT to write one `<ecc status byte><ascii text>` message per line, the same wire format
+`libLogHelper` uses per UDP datagram (see `dut_logging.py`). Both implementations raise
+`TimeoutError` from `receive()` when no message arrives within `max_timeout_time`, so
+`Machine.run()`'s receive loop is transport-agnostic. This is independent of `dut_mode` — see "What
+this is" above.
+
+Both `TelnetDUTConnection.open()` and `JTAGMessageChannel.open()` check preconditions and log
+clearly before failing (e.g. `JTAGMessageChannel` checks `os.path.exists(jtag_port)` up front)
+rather than letting a missing device/host produce a bare, easy-to-miss stack trace or a silent
+retry loop — keep that pattern when adding new transports.
 
 ### DUT-requested commands (`server/dut_commands.py`)
 
-A DUT can ask the server to perform an action at runtime by sending a `#CMD <NAME>` UDP message
-(e.g. `#CMD HARD_REBOOT`). `DUTCommandDispatcher` maps `DUTCommand` enum members to handler
-callables registered in `Machine.__init__`; `Machine.run()` parses the `#CMD` payload and calls
-`dispatch()`. The pre-existing `#INF POWER_CYCLE_REQUEST` message is kept for backward
-compatibility but is now just routed through the same dispatcher (`DUTCommand.HARD_REBOOT`).
-Adding a new remote command is a two-step, additive change: add a `DUTCommand` member, then
-`dispatcher.register(...)` a handler — no changes needed to the message-parsing code in `run()`.
+A DUT can ask the server to perform an action at runtime by sending a `#CMD <NAME>` message over
+whichever `connection_type` transport is configured (e.g. `#CMD HARD_REBOOT`). `DUTCommandDispatcher`
+maps `DUTCommand` enum members to handler callables registered in `Machine.__init__`; `Machine.run()`
+parses the `#CMD` payload and calls `dispatch()`. The pre-existing `#INF POWER_CYCLE_REQUEST`
+message is kept for backward compatibility but is now just routed through the same dispatcher
+(`DUTCommand.HARD_REBOOT`). Adding a new remote command is a two-step, additive change: add a
+`DUTCommand` member, then `dispatcher.register(...)` a handler — no changes needed to the
+message-parsing code in `run()`.
+
+### Passive DUT deployment (`server/dut_deployment.py`)
+
+For `dut_mode: passive` DUTs, `Machine.__passive_redeploy()` (called from `__soft_app_reboot`
+instead of the Telnet kill+run path) calls `redeploy_dut()`, which runs the DUT's configured
+`redeploy_cmd` (a shell-style string or, preferably, a YAML argv list — avoids shell
+quoting/injection) as a subprocess. `redeploy_dut()` streams the subprocess's combined
+stdout/stderr into the log line-by-line as it runs (prefixed `[redeploy]`), rather than only
+surfacing output at the end — these commands (e.g. `xsct`/`xsdb` driving a JTAG probe) can take
+up to a couple minutes, and silently waiting that whole time gives no indication of progress.
+Timeout is enforced with a background reader thread + polling loop rather than
+`subprocess.run(timeout=...)`, since reading `process.stdout` for streaming would otherwise block
+past the deadline if the subprocess stops producing output without exiting.
+
+Unlike `active` DUTs' `__wait_for_booting`, which polls (ping + Telnet login) for up to
+`boot_waiting_time` before the app is (re)started, `passive` DUTs skip that wait entirely and run
+`redeploy_cmd` immediately after power-on — `redeploy_cmd` scripts are expected to perform any
+board-specific reset/settle waits themselves (see e.g. `machines_cfgs/deploy_versal_jtag.sh`,
+which switches JTAG boot mode, resets the board, and sleeps before programming).
+
+`machines_cfgs/deploy_versal_jtag.sh` is a reference `redeploy_cmd` implementation for Xilinx
+Versal boards: it validates its inputs up front (PDI/ELF files exist, the `versal_scripts` TCL
+subtree is present, `xsdb` is on `PATH`, `hw_server` is reachable) before touching `xsdb`, since
+those are otherwise silent failure points that would only surface as an opaque TCL error deep
+inside `xsdb -eval`.
 
 ### Command/benchmark selection (`server/command_factory.py`)
 
@@ -116,7 +187,8 @@ refills from the original list once exhausted, so benchmarks cycle indefinitely.
 
 `DUTLogging` lazily creates one timestamped log file per benchmark run (filename encodes
 date/test/ECC-status/hostname), on the first message received. The DUT protocol reserves the first
-byte of every UDP payload for ECC status (`0xD`=OFF, `0xE`=ON); the remainder is decoded ASCII text
+byte of every message (UDP datagram or JTAG serial line, see "DUT message channel" above) for ECC
+status (`0xD`=OFF, `0xE`=ON); the remainder is decoded ASCII text
 (falling back to a per-byte `chr()` reconstruction if `UnicodeDecodeError` occurs, since the DUT
 may occasionally send non-ASCII bytes). `finish_this_dut_log` writes a trailer line whose `EndStatus`
 records *why* the run ended (normal end, soft app/OS reboot, hard reboot, unknown/`__del__`).
@@ -135,11 +207,20 @@ keep new switch backends behind that lock too.
 
 - `server_parameters.yaml`: top-level — `server_ip`, `server_log_file`, `server_log_store_dir`, and
   the list of `machines` (each an `{enabled, cfg_file}` pair pointing at a per-DUT YAML file).
-- `machines_cfgs/*.yaml`: one per physical DUT — network identity, power switch details, timing
-  knobs (`boot_waiting_time`, `max_timeout_time`), console transport (`connection_type: telnet`,
-  the default, or `jtag` with `jtag_port`/`jtag_baudrate`), and a `json_files` list of benchmark
-  definitions. Same schema and one file per DUT regardless of transport — only the
-  transport-specific fields differ.
+- `machines_cfgs/*.yaml`: one per physical DUT, combining the two independent axes described in
+  "What this is" above:
+  - `dut_mode: active` (default) or `passive`, plus whichever fields that mode needs: `active`
+    needs `ip`/`username`/`password` (Telnet) and `json_files` (benchmarks); `passive` needs
+    `redeploy_cmd` (and optionally `redeploy_timeout`, `test_name`/`test_header` in place of
+    `json_files`).
+  - `connection_type: ethernet` (default) or `jtag`, plus whichever fields that transport needs:
+    `ethernet` needs `receive_port`; `jtag` needs `jtag_port` (and optionally `jtag_baudrate`).
+  - Plus power switch details (`power_switch_ip`/`power_switch_port`/`power_switch_model`) and
+    timing knobs (`boot_waiting_time`, `max_timeout_time`, `disable_os_soft_reboot`,
+    `restart_interval`) common to every DUT. Same schema for every DUT regardless of which
+    `dut_mode`/`connection_type` combination is in use — only the mode/transport-specific fields
+    differ, and `Machine.__init__` validates that the fields required by the configured
+    combination are present.
 - `machines_cfgs/*.json`: benchmark definitions consumed by `CommandFactory` (see above).
 
 ### Logging (`server/logger_formatter.py`, `server/print_manager.py`)

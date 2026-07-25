@@ -1,7 +1,6 @@
 import errno
 import logging
 import os
-import socket
 import subprocess
 import threading
 import time
@@ -15,6 +14,7 @@ from .dut_commands import DUTCommand, DUTCommandDispatcher
 from .dut_connection import DUTConnection, create_dut_connection
 from .dut_deployment import DEFAULT_REDEPLOY_TIMEOUT, redeploy_dut
 from .dut_logging import DUTLogging, EndStatus
+from .dut_message_channel import MessageChannel, create_message_channel
 from .error_codes import ErrorCodes
 from .reboot_machine import reboot_machine, turn_machine_on
 
@@ -56,23 +56,25 @@ class Machine(threading.Thread):
     """
     # Wait time to see if the board returns, 1800 = half an hour
     __LONG_REBOOT_WAIT_TIME_AFTER_PROBLEM = 1800
-    # Data receive size in bytes
-    __DATA_SIZE = 4096
     # Num of start app tries
     __MAX_LOGIN_TRIES = 4
-    # Default connection_type when a machine config does not specify one, kept for backward compatibility
-    __DEFAULT_CONNECTION_TYPE = "telnet"
-    # Default baud rate for JTAG/serial connections when a machine config does not specify one
+    # Default connection_type when a machine config does not specify one: this is the axis that
+    # selects how the server listens for DUT status/log messages (#IT, #LOGFILE, #CMD, ...) -
+    # "ethernet" (a UDP socket) or "jtag" (the JTAG probe's serial/UART bridge). It is independent
+    # of dut_mode below (see dut_message_channel.py / dut_deployment.py).
+    __DEFAULT_CONNECTION_TYPE = "ethernet"
+    __SUPPORTED_CONNECTION_TYPES = ("ethernet", "jtag")
+    # Default baud rate for the JTAG serial/UART bridge when a machine config does not specify one
     __DEFAULT_JTAG_BAUDRATE = 115200
-    # Default dut_mode when a machine config does not specify one: an OS-enabled DUT reachable
-    # over a console (telnet/jtag), driven by kill+run commands. "passive" is the bare-metal
-    # counterpart: no console/shell, the app runs automatically once (re)loaded - see
-    # dut_deployment.py.
+    # Default dut_mode when a machine config does not specify one: an OS-enabled DUT driven by
+    # console (Telnet) kill+run commands. "passive" is the bare-metal counterpart: no console/
+    # shell, the app runs automatically once (re)loaded - see dut_deployment.py. Independent of
+    # connection_type above.
     __DEFAULT_DUT_MODE = "active"
     __SUPPORTED_DUT_MODES = ("active", "passive")
     # Default receive_port when a machine config does not specify one: 0 lets the OS pick a free
-    # ephemeral port. Only meaningful to omit for DUTs that never send UDP log traffic back to the
-    # server (e.g. a bare-metal DUT with no network stack at all).
+    # ephemeral port. Only meaningful to omit for a "jtag" connection_type, which never listens on
+    # a UDP socket at all.
     __DEFAULT_RECEIVE_PORT = 0
     # Default test_header for a passive DUT configured without 'json_files' (see 'test_name' below)
     __DEFAULT_TEST_HEADER = ""
@@ -122,46 +124,56 @@ class Machine(threading.Thread):
         if "disable_os_soft_reboot" in machine_parameters:
             self.__disable_os_soft_reboot = machine_parameters["disable_os_soft_reboot"] is True
 
-        # Console transport used to log into the DUT and issue commands (telnet or jtag)
-        self.__connection_type = machine_parameters.get("connection_type", self.__DEFAULT_CONNECTION_TYPE).lower()
-        self.__jtag_port = machine_parameters.get("jtag_port")
-        self.__jtag_baudrate = machine_parameters.get("jtag_baudrate", self.__DEFAULT_JTAG_BAUDRATE)
-
-        # ip: only actually needed to open a "telnet" connection (and for the boot-time ping
-        # check, also telnet-only - see __wait_for_booting). Optional otherwise: a "jtag" DUT
-        # connects over jtag_port instead and never dials 'ip', so it is only used there as a
-        # free-form display label passed through to the power-switch calls' logging.
-        self.__dut_ip = machine_parameters.get("ip")
-        if self.__connection_type == "telnet" and not self.__dut_ip:
-            raise ValueError("connection_type 'telnet' requires 'ip' to be set in the machine config")
-
-        # receive_port: the port libLogHelper on the DUT sends its UDP log traffic to. For a
-        # "telnet" (network) DUT this must be a fixed, known-in-advance value - both sides (this
-        # server and the DUT's own libLogHelper config) have to agree on it, so it cannot be left
-        # to an OS-assigned ephemeral port. Only optional for "jtag" DUTs that may have no network
-        # stack at all to send UDP from (e.g. a bare-metal DUT driven purely over a JTAG probe),
-        # where it defaults to 0 (OS-assigned ephemeral port) since no value could matter anyway.
-        self.__receiving_port = machine_parameters.get("receive_port")
-        if self.__connection_type == "telnet" and self.__receiving_port is None:
-            raise ValueError("connection_type 'telnet' requires 'receive_port' to be set in the machine config")
-        if self.__receiving_port is None:
-            self.__receiving_port = self.__DEFAULT_RECEIVE_PORT
-
         # dut_mode selects how the app is (re)started: "active" (default) DUTs run an OS and are
-        # driven by console kill+run commands; "passive" (bare-metal) DUTs have no console/shell
-        # and start their app automatically once it is (re)loaded, via the configured
-        # 'redeploy_cmd' (see dut_deployment.py).
+        # driven by Telnet console kill+run commands; "passive" (bare-metal) DUTs have no
+        # console/shell and start their app automatically once it is (re)loaded, via the
+        # configured 'redeploy_cmd' (see dut_deployment.py). This is independent of
+        # connection_type below - e.g. a passive DUT can still report status over Ethernet if it
+        # has a working network stack (see machines_cfgs/versal_bm_eth_passive.yaml).
         self.__dut_mode = machine_parameters.get("dut_mode", self.__DEFAULT_DUT_MODE).lower()
         if self.__dut_mode not in self.__SUPPORTED_DUT_MODES:
             raise ValueError(f"Unsupported dut_mode '{self.__dut_mode}', expected one of "
                              f"{self.__SUPPORTED_DUT_MODES}")
 
-        # username/password: only needed to log into a console, which only ever happens for
-        # "active" DUTs (see __dut_login). Optional/unused for "passive" (bare-metal) DUTs.
+        # ip/username/password: only needed for the Telnet console login (kill+run commands, and
+        # the boot-time ping check - see __dut_login/__wait_for_booting), which only ever happens
+        # for "active" DUTs. Optional/unused for "passive" (bare-metal) DUTs.
+        self.__dut_ip = machine_parameters.get("ip")
         self.__dut_username = machine_parameters.get("username")
         self.__dut_password = machine_parameters.get("password")
-        if self.__dut_mode == "active" and (self.__dut_username is None or self.__dut_password is None):
-            raise ValueError("dut_mode 'active' requires 'username' and 'password' to be set in the machine config")
+        if self.__dut_mode == "active":
+            if not self.__dut_ip:
+                raise ValueError("dut_mode 'active' requires 'ip' to be set in the machine config")
+            if self.__dut_username is None or self.__dut_password is None:
+                raise ValueError("dut_mode 'active' requires 'username' and 'password' to be set "
+                                 "in the machine config")
+
+        # connection_type selects how the server listens for DUT status/log messages (#IT,
+        # #LOGFILE, #CMD, ...): "ethernet" (default) - a UDP socket bound to
+        # server_ip:receive_port, requires the DUT to have a working network stack pointed at this
+        # server. "jtag" - the JTAG probe's serial/UART bridge (jtag_port), for DUTs with no
+        # network stack at all. Independent of dut_mode above (see dut_message_channel.py).
+        self.__connection_type = machine_parameters.get("connection_type", self.__DEFAULT_CONNECTION_TYPE).lower()
+        if self.__connection_type not in self.__SUPPORTED_CONNECTION_TYPES:
+            raise ValueError(f"Unsupported connection_type '{self.__connection_type}', expected one of "
+                             f"{self.__SUPPORTED_CONNECTION_TYPES}")
+
+        # receive_port: the UDP port libLogHelper on the DUT sends its log traffic to. Required
+        # (and must be a fixed, known-in-advance value - both sides have to agree on it) when
+        # connection_type is "ethernet". Unused when connection_type is "jtag".
+        self.__receiving_port = machine_parameters.get("receive_port")
+        if self.__connection_type == "ethernet" and self.__receiving_port is None:
+            raise ValueError("connection_type 'ethernet' requires 'receive_port' to be set in the machine config")
+        if self.__receiving_port is None:
+            self.__receiving_port = self.__DEFAULT_RECEIVE_PORT
+
+        # jtag_port/jtag_baudrate: the serial device exposed by the JTAG probe's UART bridge, read
+        # for DUT messages instead of a UDP socket. Required when connection_type is "jtag";
+        # jtag_baudrate defaults to 115200 if omitted. Unused when connection_type is "ethernet".
+        self.__jtag_port = machine_parameters.get("jtag_port")
+        self.__jtag_baudrate = machine_parameters.get("jtag_baudrate", self.__DEFAULT_JTAG_BAUDRATE)
+        if self.__connection_type == "jtag" and not self.__jtag_port:
+            raise ValueError("connection_type 'jtag' requires 'jtag_port' to be set in the machine config")
 
         self.__redeploy_cmd = machine_parameters.get("redeploy_cmd")
         self.__redeploy_timeout = machine_parameters.get("redeploy_timeout", DEFAULT_REDEPLOY_TIMEOUT)
@@ -205,14 +217,13 @@ class Machine(threading.Thread):
             os.mkdir(self.__dut_log_path)
 
         self.__dut_logging_obj = None
-        # Configure the socket
-        self.__messages_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.__messages_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.__messages_socket.bind((server_ip, self.__receiving_port))
-        # If receive_port was omitted/0, record the actual OS-assigned port (only used for
-        # display in __str__ - nothing else depends on which port was actually bound).
-        self.__receiving_port = self.__messages_socket.getsockname()[1]
-        self.__messages_socket.settimeout(self.__max_timeout_time)
+        # Channel the server listens on for DUT status/log messages - a UDP socket ("ethernet") or
+        # the JTAG probe's serial/UART bridge ("jtag"), per connection_type above.
+        self.__message_channel: MessageChannel = create_message_channel(
+            connection_type=self.__connection_type, timeout=self.__max_timeout_time,
+            logger_name=self.__logger_name, server_ip=server_ip, receive_port=self.__receiving_port,
+            jtag_port=self.__jtag_port, jtag_baudrate=self.__jtag_baudrate)
+        self.__message_channel.open()
 
         # Variables to control rebooting (soft app and soft OS) process
         self.__soft_app_reboot_count = 0
@@ -223,7 +234,11 @@ class Machine(threading.Thread):
 
     def __str__(self) -> str:
         dut_str = f"IP:{self.__dut_ip} USERNAME:{self.__dut_username} "
-        dut_str += f"HOSTNAME:{self.__dut_hostname} RECPORT:{self.__receiving_port}"
+        dut_str += f"HOSTNAME:{self.__dut_hostname} CONN:{self.__connection_type}"
+        if self.__connection_type == "ethernet":
+            dut_str += f" RECPORT:{getattr(self.__message_channel, 'receive_port', self.__receiving_port)}"
+        else:
+            dut_str += f" JTAGPORT:{self.__jtag_port}"
         return dut_str
 
     def run(self):
@@ -243,31 +258,31 @@ class Machine(threading.Thread):
         self.__soft_app_reboot()
         while self.__stop_event.is_set() is False:
             try:
-                data, address = self.__messages_socket.recvfrom(self.__DATA_SIZE)
+                data = self.__message_channel.receive()
                 self.__dut_logging_obj(message=data)
                 try:
                     data_decoded = data.decode("ascii")[1:]
                 except UnicodeDecodeError:
                     data_decoded = "".join(chr(chi) for chi in data[1:])
 
-                connection_type = PossibleMessages.get_message_type(log_string=data_decoded)
+                message_type = PossibleMessages.get_message_type(log_string=data_decoded)
 
                 # TO AVOID making sequential reboot when receiving good data,
                 # This is necessary to fix the behavior when a device keeps crashing for multiple times
                 # in a short period, but eventually comes to life again
-                if connection_type == PossibleMessages.IT:
+                if message_type == PossibleMessages.IT:
                     self.__soft_app_reboot_count = 0
                     self.__hard_reboot_count = 0
 
                 # We need to power cycle the DUT if it requests to do so
                 # (kept as its own message type for backward compatibility with existing DUTs;
                 # it is functionally equivalent to '#CMD HARD_REBOOT')
-                if connection_type == PossibleMessages.POWER_CYCLE_REQUEST:
+                if message_type == PossibleMessages.POWER_CYCLE_REQUEST:
                     self.__logger.info(f"Power Cycle Request received from {self}")
                     self.__command_dispatcher.dispatch(DUTCommand.HARD_REBOOT.value)
 
                 # Generic DUT-requested commands, e.g. '#CMD HARD_REBOOT' or '#CMD SOFT_REBOOT'
-                if connection_type == PossibleMessages.CMD:
+                if message_type == PossibleMessages.CMD:
                     raw_command = data_decoded.split(PossibleMessages.CMD.value, 1)[-1].strip()
                     self.__command_dispatcher.dispatch(raw_command)
 
@@ -275,21 +290,21 @@ class Machine(threading.Thread):
                 # rather than waiting for the socket to time out. previous_log_end_status records
                 # which of the two it was; __soft_app_reboot picks the active (console kill+run) or
                 # passive (redeploy_cmd) restart path based on this DUT's configured dut_mode.
-                if connection_type in (PossibleMessages.ABORT, PossibleMessages.END):
-                    self.__logger.info(f"{connection_type} received from {self}, restarting the app "
+                if message_type in (PossibleMessages.ABORT, PossibleMessages.END):
+                    self.__logger.info(f"{message_type} received from {self}, restarting the app "
                                        f"in {self.__restart_interval}s")
                     self.__stop_event.wait(self.__restart_interval)
-                    end_status = EndStatus.ABORTED if connection_type == PossibleMessages.ABORT \
+                    end_status = EndStatus.ABORTED if message_type == PossibleMessages.ABORT \
                         else EndStatus.NORMAL_END
                     self.__soft_app_reboot(previous_log_end_status=end_status)
 
-                self.__logger.debug(f"{connection_type} - Connection from {self}")
+                self.__logger.debug(f"{message_type} - Connection from {self}")
 
                 if self.__command_factory is not None and self.__command_factory.is_command_window_timed_out:
                     self.__logger.info(
                         f"Benchmark exceeded the command execution window, executing another one now on {self}.")
                     self.__soft_app_reboot(previous_log_end_status=EndStatus.NORMAL_END)
-            except (TimeoutError, socket.timeout):
+            except TimeoutError:
                 # Soft app reboot
                 soft_app_reboot_status = self.__soft_app_reboot(previous_log_end_status=EndStatus.SOFT_APP_REBOOT)
                 if soft_app_reboot_status == ErrorCodes.SUCCESS:
@@ -314,12 +329,10 @@ class Machine(threading.Thread):
         self.__soft_app_reboot(previous_log_end_status=EndStatus.SOFT_APP_REBOOT)
 
     def __new_dut_connection(self) -> DUTConnection:
-        """ Build a fresh, not-yet-logged-in connection using this machine's configured transport
-        (telnet or jtag, see connection_type in the machine's YAML config) """
-        return create_dut_connection(connection_type=self.__connection_type, username=self.__dut_username,
+        """ Build a fresh, not-yet-logged-in Telnet console connection for this (active) DUT """
+        return create_dut_connection(ip=self.__dut_ip, username=self.__dut_username,
                                      password=self.__dut_password, timeout=self.__max_timeout_time,
-                                     logger_name=self.__logger_name, ip=self.__dut_ip,
-                                     jtag_port=self.__jtag_port, jtag_baudrate=self.__jtag_baudrate)
+                                     logger_name=self.__logger_name)
 
     def __dut_login(self) -> DUTConnection:
         """ Open a new DUT console connection and perform the login handshake
@@ -430,11 +443,12 @@ class Machine(threading.Thread):
 
     def __wait_for_booting(self):
         if self.__dut_mode == "passive":
-            # Passive/bare-metal DUTs have no console/shell to probe for readiness - just wait
-            # out boot_waiting_time. The app itself is (re)loaded right after this call returns,
-            # by __soft_app_reboot's redeploy_cmd step.
-            self.__stop_event.wait(self.__boot_waiting_time)
-            self.__logger.info(f"Boot wait finished (passive DUT) {self}")
+            # Passive/bare-metal DUTs have no console/shell to probe for readiness, and
+            # redeploy_cmd (e.g. an xsct/JTAG script) already performs any board-specific
+            # reset/settle waits it needs internally - so unlike 'active' DUTs there is nothing to
+            # wait/poll for here. Deploy immediately rather than sitting idle for boot_waiting_time
+            # (which does not apply to passive DUTs) before ever invoking redeploy_cmd.
+            self.__logger.info(f"Passive DUT - skipping boot wait, deploying immediately on {self}")
             return ErrorCodes.SUCCESS
 
         current_timestamp = time.time()
@@ -443,10 +457,11 @@ class Machine(threading.Thread):
             # All loops must stop after the event is set
             if self.__stop_event.is_set():
                 break
-            # Pinging the board (skipped for non-network transports, e.g. jtag, which may have no IP stack up)
+            # dut_mode 'active' always uses Telnet for its console (see __new_dut_connection), so
+            # a ping check is always meaningful here regardless of connection_type (which only
+            # selects the message-listening transport).
             try:
-                if self.__connection_type == "telnet":
-                    subprocess.check_output(["ping", "-c", "1", self.__dut_ip], timeout=self.__BOOT_PING_TIMEOUT)
+                subprocess.check_output(["ping", "-c", "1", self.__dut_ip], timeout=self.__BOOT_PING_TIMEOUT)
                 # Try to see if the DUT console login is indeed possible
                 tn = self.__dut_login()
                 tn.close()
@@ -570,3 +585,4 @@ class Machine(threading.Thread):
     def stop(self) -> None:
         """ Stop the main function before join the thread """
         self.__stop_event.set()
+        self.__message_channel.close()

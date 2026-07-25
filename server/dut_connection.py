@@ -2,21 +2,16 @@
 Abstraction over the console connection used to log into a DUT and issue commands to it
 (start/kill a benchmark, trigger an OS reboot, ...).
 
-Two transports are provided:
-- TelnetDUTConnection: the original network Telnet connection.
-- JTAGDUTConnection: a serial console reached through a JTAG probe's UART bridge (e.g. an
-  FTDI-based adapter exposing a virtual COM port for the target's console), using pyserial.
-
-The login handshake (wait for a login/password prompt, authenticate, wait for a shell prompt) is
-identical across transports, so it lives once in DUTConnection.login() built on top of four raw
-I/O primitives (open/write/read_until/read_very_eager/close) that each subclass implements. Adding
-a new transport (e.g. SSH) means implementing those primitives only; Machine and the login
-handshake do not need to change.
+Active DUTs (dut_mode: active, see machine.py) always use a network Telnet connection for this -
+console access is independent of the "ethernet vs jtag" axis, which only controls how the server
+listens for DUT status messages (see dut_message_channel.py). There is currently only one
+transport, TelnetDUTConnection; the abstraction exists so a future transport (e.g. SSH) only needs
+to implement the four raw I/O primitives below (open/write/read_until/read_very_eager/close) - the
+login handshake (wait for a login/password prompt, authenticate, wait for a shell prompt) is
+transport-agnostic and lives once in DUTConnection.login().
 """
 import abc
 import logging
-import os
-import time
 import typing
 
 
@@ -111,79 +106,8 @@ class TelnetDUTConnection(DUTConnection):
             self.__telnet.close()
 
 
-class JTAGDUTConnection(DUTConnection):
-    """ Serial console connection reached through a JTAG probe's UART bridge, using pyserial """
-
-    def __init__(self, port: str, baudrate: int, username: str, password: str, timeout: float, logger_name: str):
-        super().__init__(username=username, password=password, timeout=timeout, logger_name=logger_name)
-        self.__port = port
-        self.__baudrate = baudrate
-        self.__serial = None
-        # Bytes already read from the port that have not been consumed by read_until/read_very_eager yet
-        self.__buffer = b""
-
-    def open(self) -> None:
-        import serial
-        self._logger.info(f"Opening JTAG serial connection on port={self.__port} baudrate={self.__baudrate}")
-
-        # pyserial's own error for a missing device is accurate but easy to miss buried in a
-        # traceback/retry loop; check up front so a wrong/unplugged jtag_port is unmistakable in
-        # the logs instead of just causing repeated silent connection retries.
-        if not os.path.exists(self.__port):
-            self._logger.error(
-                f"JTAG serial port {self.__port} does not exist. Check that the JTAG probe/UART "
-                f"adapter is plugged in, that 'jtag_port' in the machine config matches the actual "
-                f"device (see 'ls /dev/ttyUSB*' or 'ls /dev/ttyACM*' on the server host), and that "
-                f"the server has permission to access it (e.g. dialout group).")
-            raise serial.SerialException(f"JTAG serial port {self.__port} not found")
-
-        try:
-            self.__serial = serial.Serial(port=self.__port, baudrate=self.__baudrate, timeout=self._timeout)
-        except serial.SerialException as e:
-            self._logger.error(f"Failed to open JTAG serial port {self.__port}: {e}")
-            raise
-        self.__buffer = b""
-        self._logger.info(f"JTAG serial connection opened on {self.__port}")
-
-    def write(self, data: bytes) -> None:
-        self.__serial.write(data)
-
-    def read_until(self, expected: bytes, timeout: typing.Optional[float] = None) -> bytes:
-        deadline = time.time() + (timeout if timeout is not None else self._timeout)
-        while expected not in self.__buffer and time.time() < deadline:
-            waiting = self.__serial.in_waiting
-            chunk = self.__serial.read(waiting if waiting else 1)
-            self.__buffer += chunk
-
-        if expected not in self.__buffer:
-            return b""
-
-        split_at = self.__buffer.index(expected) + len(expected)
-        result, self.__buffer = self.__buffer[:split_at], self.__buffer[split_at:]
-        return result
-
-    def read_very_eager(self) -> bytes:
-        waiting = self.__serial.in_waiting
-        result, self.__buffer = self.__buffer + self.__serial.read(waiting), b""
-        return result
-
-    def close(self) -> None:
-        if self.__serial is not None:
-            self.__serial.close()
-
-
-def create_dut_connection(connection_type: str, username: str, password: str, timeout: float, logger_name: str,
-                          **transport_kwargs) -> DUTConnection:
-    """ Build a fresh (not-yet-opened) DUTConnection for the given transport
-    :param connection_type: "telnet" or "jtag"
-    :param transport_kwargs: for "telnet": ip. For "jtag": jtag_port, jtag_baudrate.
-    :raises ValueError: if connection_type is not supported
-    """
-    connection_type = connection_type.lower()
-    if connection_type == "telnet":
-        return TelnetDUTConnection(ip=transport_kwargs["ip"], username=username, password=password,
-                                   timeout=timeout, logger_name=logger_name)
-    if connection_type == "jtag":
-        return JTAGDUTConnection(port=transport_kwargs["jtag_port"], baudrate=transport_kwargs["jtag_baudrate"],
-                                 username=username, password=password, timeout=timeout, logger_name=logger_name)
-    raise ValueError(f"Unsupported connection_type '{connection_type}', expected 'telnet' or 'jtag'")
+def create_dut_connection(ip: str, username: str, password: str, timeout: float,
+                          logger_name: str) -> DUTConnection:
+    """ Build a fresh (not-yet-opened) DUTConnection for an active DUT's console (always Telnet) """
+    return TelnetDUTConnection(ip=ip, username=username, password=password, timeout=timeout,
+                               logger_name=logger_name)

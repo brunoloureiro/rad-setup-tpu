@@ -11,11 +11,25 @@ This server runs outside the beam room and communicates with devices through a n
 
 ## 🚀 Features
 
-- Multi-machine UDP listener server
+Each DUT is configured along two independent axes:
+
+- **`dut_mode`: `active` or `passive`** — how the app is (re)started. `active` DUTs run an OS and
+  are driven over Telnet (login + kill/run commands from `json_files`). `passive` (bare-metal)
+  DUTs have no OS/shell; the server instead runs a local `redeploy_cmd` (e.g. a JTAG/xsct script)
+  to (re)load and start the app, immediately after power-on.
+- **`connection_type`: `ethernet` or `jtag`** — how the server listens for DUT status/log messages
+  (`#IT`, `#LOGFILE`, `#CMD`, ...). `ethernet` (default) is a UDP socket bound to
+  `server_ip:receive_port`. `jtag` reads the JTAG probe's serial/UART bridge instead, for DUTs with
+  no network stack at all.
+
+Any combination is valid - see [`CLAUDE.md`](CLAUDE.md) for the full architecture writeup.
+
+- Multi-machine listener server (UDP or JTAG serial, per DUT)
 - Saves received data in organized files with timestamps and addresses
 - Configurable experiment parameters through YAML files
 - Integrates with [libLogHelper](https://github.com/radhelper/libLogHelper) on the client side
-- Uses Telnet or a JTAG probe's serial/UART bridge for remote device command execution
+- `active` DUTs: Telnet console for remote command execution. `passive` DUTs: a local redeploy
+  command (e.g. driving a JTAG probe) to (re)load and start the app
 - DUTs can request server-side actions (e.g. a power cycle) at runtime through a `#CMD` message
 
 ---
@@ -32,14 +46,16 @@ This server runs outside the beam room and communicates with devices through a n
                      +-----------------------------+
                      | Radiation Setup Server      |
                      |                             |
-                     |  • Start TCP listeners      |
+                     |  • Listen for DUT messages  |
                      |  • Receive log/data objects |
                      |  • Save data to disk        |
                      +-----------------------------+
 ```
 
-Messages from clients are logged using [libLogHelper](https://github.com/radhelper/libLogHelper).  
-The server collects those messages over UDP and stores them under `logs/` with timestamps.
+Messages from clients are logged using [libLogHelper](https://github.com/radhelper/libLogHelper).
+The server collects those messages - over a UDP socket (`connection_type: ethernet`) or a JTAG
+probe's serial/UART bridge (`connection_type: jtag`), per DUT - and stores them under `logs/` with
+timestamps.
 
 ---
 
@@ -54,13 +70,14 @@ The server collects those messages over UDP and stores them under `logs/` with t
 - pandas ≥ 1.3.5
 - requests ≥ 2.27.1
 - pyserial ≥ 3.5 (only required if any DUT uses `connection_type: jtag`)
-- Telnet server installed (only required if any DUT uses `connection_type: telnet`, the default)
+- Telnet client installed (only required if any DUT uses `dut_mode: active`, the default)
 
 **Client requirements**
 
-- `libLogHelper` C++ logging library (includes Python wrapper)
-- Telnet or SSH server for running workloads on the device under test, or a JTAG probe exposing a
-  serial console (e.g. an FTDI-based UART bridge) if using `connection_type: jtag`
+- `libLogHelper` C++ logging library (includes Python wrapper), for `dut_mode: active` DUTs
+- A Telnet server for running workloads on `dut_mode: active` DUTs
+- A JTAG probe (e.g. an FTDI-based UART bridge, or a Xilinx-style debug probe driven by
+  `xsct`/`xsdb`) for `dut_mode: passive` DUTs, and/or for `connection_type: jtag` message listening
 
 ---
 
@@ -104,9 +121,12 @@ machines: [
 
 ### Machine configuration
 
-Each device under test must have its own configuration file in `machines_cfgs/`.
+Each device under test must have its own configuration file in `machines_cfgs/`. Two independent
+fields, `dut_mode` and `connection_type`, select the combination that fits your DUT - see
+"Features" above for what each value means.
 
-Example:
+**`dut_mode: active` (default), `connection_type: ethernet` (default)** - an OS-based DUT reachable
+over Telnet, reporting status over UDP. This is the original/default mode:
 
 ```yaml
 ip:  192.168.195.6
@@ -120,16 +140,14 @@ power_switch_model: lindy
 boot_waiting_time: !!int 60
 max_timeout_time: !!int 10
 disable_os_soft_reboot: !!bool True
-# Transport used to log into the DUT console: "telnet" (default) or "jtag"
-connection_type: telnet
+connection_type: ethernet
 json_files: [
     "machines_cfgs/dummy.json",
 ]
-
 ```
 
-To control a DUT over JTAG instead, set `connection_type: jtag` and point `jtag_port` at the
-serial device exposed by the JTAG probe's UART bridge:
+**`connection_type: jtag`** - listen for DUT status/log messages over a JTAG probe's serial/UART
+bridge instead of UDP (independent of `dut_mode`; this only changes how messages are *received*):
 
 ```yaml
 connection_type: jtag
@@ -137,8 +155,28 @@ jtag_port: /dev/ttyUSB0
 jtag_baudrate: !!int 115200   # optional, defaults to 115200
 ```
 
-When using JTAG, the server skips the network ping performed before a Telnet login attempt (the
-DUT may have no IP stack up at boot) and logs into the same console prompt over the serial link.
+**`dut_mode: passive`** - a bare-metal DUT with no OS/shell. Instead of Telnet kill/run commands,
+the server runs a local `redeploy_cmd` (e.g. a JTAG/xsct deployment script) to (re)load and start
+the app, immediately after power-on:
+
+```yaml
+hostname: versal_bm_jtag
+power_switch_ip: 192.168.0.100
+power_switch_port: !!int 1
+power_switch_model: lindy
+boot_waiting_time: !!int 60   # unused for dut_mode: passive
+max_timeout_time: !!int 5
+dut_mode: passive
+connection_type: jtag         # this DUT has no network stack, so messages come over JTAG too
+jtag_port: /dev/ttyUSB1
+redeploy_cmd: ["xsct", "/home/user/scripts/deploy.tcl"]
+redeploy_timeout: !!int 90    # optional, defaults to 60
+test_name: versal_bm_jtag     # used to name DUTLogging files (json_files is optional here)
+```
+
+See `machines_cfgs/versal_bm_jtag_passive.yaml` and `machines_cfgs/versal_bm_eth_passive.yaml` for
+full worked examples (the latter is `dut_mode: passive` with `connection_type: ethernet` - a
+bare-metal DUT that still has a working network stack to send its status messages over).
 
 ---
 
@@ -163,8 +201,9 @@ Example:
 
 ### DUT-requested commands
 
-A DUT can ask the server to perform an action at any time by sending a UDP message whose payload
-(after the leading ECC status byte) starts with `#CMD`, followed by the command name:
+A DUT can ask the server to perform an action at any time by sending a message (over whichever
+`connection_type` is configured - UDP or JTAG serial) whose payload (after the leading ECC status
+byte) starts with `#CMD`, followed by the command name:
 
 ```
 #CMD HARD_REBOOT

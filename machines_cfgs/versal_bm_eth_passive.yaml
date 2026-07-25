@@ -1,10 +1,14 @@
-# Configuration for the Versal Bare-Metal DUT, passive mode, reached over Ethernet.
+# Configuration for the Versal Bare-Metal DUT, passive mode, reporting status over Ethernet.
 #
 # dut_mode is "passive": this board has no OS/shell. Its app starts running automatically as soon
 # as it is (re)loaded via 'redeploy_cmd' below (an xsct/JTAG-debugger deployment script), instead
 # of being started by logging into a console and issuing kill/run commands. Deployment/reload
-# always goes over the JTAG debug probe (see redeploy_cmd) regardless of this DUT's network
-# reachability; "ethernet-based" here refers to this DUT's management/log-facing IP.
+# always goes over the JTAG debug probe (see redeploy_cmd) regardless of connection_type below,
+# which is a separate, independent axis: it only controls how the server listens for this DUT's
+# status/log messages. Here connection_type is "ethernet" because this board's application has a
+# working network stack and sends its libLogHelper messages over UDP; contrast with
+# versal_bm_jtag_passive.yaml, where the board has no network stack at all and messages are instead
+# read off the JTAG probe's serial/UART bridge.
 
 # the IP address of the machine
 ip: 192.168.0.24
@@ -27,7 +31,9 @@ power_switch_port: !!int 1
 # power_switch_model brand of the power switch
 power_switch_model: lindy
 
-# The server will wait for this time for the OS booting
+# The server will wait for this time for the OS booting. Only meaningful for dut_mode "active"
+# (ignored here, dut_mode is "passive" below): passive DUTs redeploy immediately after power-on
+# instead of waiting, since redeploy_cmd already performs its own board-specific settle waits.
 # In seconds
 boot_waiting_time: !!int 60
 
@@ -39,21 +45,22 @@ max_timeout_time: !!int 5
 # (dut_mode: passive forces this to True automatically anyway, since there is no OS to reboot)
 disable_os_soft_reboot: !!bool True
 
-# connection_type: transport used to log into the DUT console and issue commands.
-# Supported values: "telnet" (default, used if omitted) or "jtag".
-connection_type: telnet
+# connection_type: how the server listens for DUT status/log messages (#IT, #LOGFILE, #CMD, ...).
+# Supported values: "ethernet" (default, used if omitted) - a UDP socket bound to
+# server_ip:receive_port, or "jtag" - the JTAG probe's serial/UART bridge (jtag_port/jtag_baudrate
+# below). Independent of dut_mode below.
+connection_type: ethernet
 
 # jtag_port / jtag_baudrate: only used when connection_type is "jtag". jtag_port is the serial
-# device exposed by the JTAG probe's UART bridge (e.g. an FTDI-based adapter), jtag_baudrate
-# defaults to 115200 if omitted.
+# device exposed by the JTAG probe's UART bridge (e.g. an FTDI-based adapter) that the server reads
+# DUT messages from, jtag_baudrate defaults to 115200 if omitted.
 # connection_type: jtag
 # jtag_port: /dev/ttyUSB0
 # jtag_baudrate: !!int 115200
 
 # dut_mode: how the app is (re)started on this DUT.
-# - "active" (default, used if omitted): an OS-enabled DUT reachable over a console
-#   (connection_type telnet/jtag); the app is (re)started by logging in and issuing kill/run
-#   commands.
+# - "active" (default, used if omitted): an OS-enabled DUT reachable over a Telnet console;
+#   the app is (re)started by logging in and issuing kill/run commands.
 # - "passive": a bare-metal DUT (e.g. FPGA/SoC) with no OS/shell, whose app runs automatically
 #   as soon as it is (re)loaded. Instead of console commands, the app is (re)started by running
 #   'redeploy_cmd' below (soft OS reboot is automatically disabled in this mode, as there is no
@@ -62,7 +69,8 @@ dut_mode: passive
 
 # redeploy_cmd: required when dut_mode is "passive". Command used to (re)load and start the app,
 # e.g. a TCL script driven through a JTAG debugger (Xilinx xsct/xsdb). Either a shell-style
-# string or a YAML list (list form avoids shell quoting/injection concerns and is preferred).
+# string or a YAML list (list form avoids shell quoting/injection concerns and is preferred). Run
+# immediately after the DUT is powered on (no boot_waiting_time wait first - see machine.py).
 #
 # deploy_versal_jtag.sh mirrors versal-aie-dev's `make deploy` (see that repo's Makefile,
 # 'deploy'/'_post_bsp_deploy' targets): it switches the board to JTAG boot mode and resets it
