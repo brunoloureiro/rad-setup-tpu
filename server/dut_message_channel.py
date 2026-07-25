@@ -91,6 +91,9 @@ class JTAGMessageChannel(MessageChannel):
         self.__serial = None
         # Bytes already read from the port that have not yet been split into a complete message
         self.__buffer = b""
+        # Avoids re-logging the same "port missing" error on every receive() call while the probe
+        # stays disconnected
+        self.__port_missing_logged = False
 
     def open(self) -> None:
         import serial
@@ -117,20 +120,68 @@ class JTAGMessageChannel(MessageChannel):
         self._logger.info(f"Listening for DUT messages over JTAG serial port {self.__port}")
 
     def receive(self) -> bytes:
+        import serial
+
+        # The port was closed by a previous disconnect (see except clause below) - try to reopen
+        # it before reading. A hard/soft reboot may have re-enumerated the USB adapter by now (see
+        # DEBUG_PROGRESS.md: a board reset can briefly drop power to the onboard FTDI chip and
+        # make it disappear/reappear as a device node). If it's still not there, treat this like a
+        # regular receive timeout so Machine.run()'s existing timeout-escalation logic (soft app
+        # reboot / redeploy -> soft OS reboot -> hard power cycle) kicks in instead of crashing the
+        # Machine thread.
+        if self.__serial is None:
+            self.__attempt_reopen()
+            if self.__serial is None:
+                raise TimeoutError(f"JTAG serial port {self.__port} is unavailable")
+
         deadline = time.time() + self._timeout
         while b"\n" not in self.__buffer:
             if time.time() >= deadline:
                 raise TimeoutError(f"No DUT message received on {self.__port} within {self._timeout}s")
-            waiting = self.__serial.in_waiting
-            chunk = self.__serial.read(waiting if waiting else 1)
+            try:
+                waiting = self.__serial.in_waiting
+                chunk = self.__serial.read(waiting if waiting else 1)
+            except (serial.SerialException, OSError) as e:
+                self._logger.error(
+                    f"JTAG serial port {self.__port} disconnected while reading ({e}) - closing it; "
+                    f"will attempt to reopen it on the next receive() call")
+                self.__close_serial()
+                raise TimeoutError(f"JTAG serial port {self.__port} disconnected: {e}") from e
             self.__buffer += chunk
 
         line, self.__buffer = self.__buffer.split(b"\n", 1)
         return line.rstrip(b"\r")
 
-    def close(self) -> None:
+    def __close_serial(self) -> None:
         if self.__serial is not None:
-            self.__serial.close()
+            try:
+                self.__serial.close()
+            except Exception as e:
+                self._logger.warning(f"Error closing already-broken JTAG serial port {self.__port}: {e}")
+            self.__serial = None
+        self.__buffer = b""
+
+    def __attempt_reopen(self) -> None:
+        import serial
+
+        if not os.path.exists(self.__port):
+            if not self.__port_missing_logged:
+                self._logger.error(
+                    f"JTAG serial port {self.__port} not present - waiting for it to reappear (e.g. "
+                    f"after a power cycle re-enumerates the USB/JTAG-UART adapter)")
+                self.__port_missing_logged = True
+            return
+
+        self.__port_missing_logged = False
+        try:
+            self.__serial = serial.Serial(port=self.__port, baudrate=self.__baudrate, timeout=0.5)
+            self._logger.info(f"Reopened JTAG serial port {self.__port} for DUT messages")
+        except serial.SerialException as e:
+            self._logger.error(f"Failed to reopen JTAG serial port {self.__port}: {e}")
+            self.__serial = None
+
+    def close(self) -> None:
+        self.__close_serial()
 
 
 def create_message_channel(connection_type: str, timeout: float, logger_name: str,

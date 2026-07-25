@@ -13,7 +13,8 @@
 #
 # 'ip', 'receive_port', 'username' and 'password' are all omitted below - none of them are used
 # for a dut_mode "passive" DUT (no console login is ever performed) with connection_type "jtag"
-# (no UDP socket is ever opened).
+# (no UDP socket is ever opened). 'username' defaults to 'hostname' below when omitted (it is only
+# ever used for informational display - e.g. __str__ - for a "passive" DUT, see machine.py).
 
 # hostname the hostname of the machine, that must contains the device in the name
 hostname: versal_bm_jtag

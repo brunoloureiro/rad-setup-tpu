@@ -24,7 +24,8 @@ hostname: caroldummy
 
 # username
 # Required when dut_mode is "active" (the default - see below), since a console login is
-# performed. Optional/unused when dut_mode is "passive" (no console is ever logged into).
+# performed. Optional/unused when dut_mode is "passive" (no console is ever logged into) -
+# defaults to 'hostname' above when omitted in that case.
 username: carol
 
 # password of the device

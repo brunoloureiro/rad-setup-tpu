@@ -20,7 +20,8 @@ receive_port: !!int 1024
 hostname: versal_bm_ethernet
 
 # username / password: omitted - unused, since dut_mode is "passive" and no console login is ever
-# performed for this DUT (see server/machine.py).
+# performed for this DUT (see server/machine.py). 'username' defaults to 'hostname' above when
+# omitted (only ever used for informational display for a "passive" DUT).
 
 # power_switch_ip IP address of the power switch
 power_switch_ip: 192.168.0.100

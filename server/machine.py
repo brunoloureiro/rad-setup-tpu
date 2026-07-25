@@ -147,6 +147,11 @@ class Machine(threading.Thread):
             if self.__dut_username is None or self.__dut_password is None:
                 raise ValueError("dut_mode 'active' requires 'username' and 'password' to be set "
                                  "in the machine config")
+        elif self.__dut_username is None:
+            # "passive" DUTs never log into a Telnet console, so username is only ever used for
+            # informational purposes (e.g. __str__ below) - default it to hostname rather than
+            # requiring it to be redundantly set in the config.
+            self.__dut_username = self.__dut_hostname
 
         # connection_type selects how the server listens for DUT status/log messages (#IT,
         # #LOGFILE, #CMD, ...): "ethernet" (default) - a UDP socket bound to

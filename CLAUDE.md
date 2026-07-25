@@ -129,8 +129,8 @@ implementations selected per-machine by the `connection_type` field in that DUT'
 `server_ip:receive_port`, the original behavior) and `JTAGMessageChannel` (reads the JTAG probe's
 serial/UART bridge, via `pyserial`; config fields `jtag_port` and optional `jtag_baudrate`).
 `JTAGMessageChannel` frames messages by splitting the serial byte stream on `\n` — it expects the
-DUT to write one `<ecc status byte><ascii text>` message per line, the same wire format
-`libLogHelper` uses per UDP datagram (see `dut_logging.py`). Both implementations raise
+DUT to write one ASCII-text message per line, the same wire format `libLogHelper` uses per UDP
+datagram (see `dut_logging.py`). Both implementations raise
 `TimeoutError` from `receive()` when no message arrives within `max_timeout_time`, so
 `Machine.run()`'s receive loop is transport-agnostic. This is independent of `dut_mode` — see "What
 this is" above.
@@ -139,6 +139,17 @@ Both `TelnetDUTConnection.open()` and `JTAGMessageChannel.open()` check precondi
 clearly before failing (e.g. `JTAGMessageChannel` checks `os.path.exists(jtag_port)` up front)
 rather than letting a missing device/host produce a bare, easy-to-miss stack trace or a silent
 retry loop — keep that pattern when adding new transports.
+
+`JTAGMessageChannel.receive()` also treats a mid-run serial disconnect (e.g. the USB JTAG/UART
+adapter dropping out, which can happen when a board reset briefly cuts power to the onboard FTDI
+chip) the same way as a plain timeout: it catches `serial.SerialException`/`OSError` from the
+read, closes the now-broken `serial.Serial` handle, and raises `TimeoutError` instead of letting
+the exception escape and crash the Machine thread. The next `receive()` call tries to reopen the
+port before reading again (`__attempt_reopen`), so it self-heals once the device node reappears.
+Either way, this feeds into `Machine.run()`'s existing timeout-escalation logic (soft app
+reboot/redeploy -> soft OS reboot -> hard power cycle) exactly like an unresponsive DUT would —
+for a `dut_mode: passive` DUT this means `redeploy_cmd` and a power-switch cycle, matching the
+active-mode Telnet-unreachable case.
 
 ### DUT-requested commands (`server/dut_commands.py`)
 
@@ -186,12 +197,11 @@ refills from the original list once exhausted, so benchmarks cycle indefinitely.
 ### DUT logging (`server/dut_logging.py`)
 
 `DUTLogging` lazily creates one timestamped log file per benchmark run (filename encodes
-date/test/ECC-status/hostname), on the first message received. The DUT protocol reserves the first
-byte of every message (UDP datagram or JTAG serial line, see "DUT message channel" above) for ECC
-status (`0xD`=OFF, `0xE`=ON); the remainder is decoded ASCII text
-(falling back to a per-byte `chr()` reconstruction if `UnicodeDecodeError` occurs, since the DUT
-may occasionally send non-ASCII bytes). `finish_this_dut_log` writes a trailer line whose `EndStatus`
-records *why* the run ended (normal end, soft app/OS reboot, hard reboot, unknown/`__del__`).
+date/test/hostname), on the first message received. Every message (UDP datagram or JTAG serial
+line, see "DUT message channel" above) is decoded ASCII text (falling back to a per-byte `chr()`
+reconstruction if `UnicodeDecodeError` occurs, since the DUT may occasionally send non-ASCII
+bytes). `finish_this_dut_log` writes a trailer line whose `EndStatus` records *why* the run ended
+(normal end, soft app/OS reboot, hard reboot, unknown/`__del__`).
 
 ### Power switch control (`server/reboot_machine.py`)
 
