@@ -3,8 +3,7 @@ DUT-initiated remote commands.
 
 The DUT can ask the server to perform an action by sending a UDP message of the form:
     #CMD <COMMAND_NAME> [args...]
-e.g. b'\\xe#CMD HARD_REBOOT' (first byte is the ECC status, consumed before this module ever
-sees the message; see server/machine.py and server/dut_logging.py).
+e.g. b'#CMD HARD_REBOOT'.
 
 Handlers are registered by name in a DUTCommandDispatcher, so adding a new remote command is a
 two-step change: add a member to DUTCommand, then call dispatcher.register(...) with a handler
@@ -20,6 +19,10 @@ class DUTCommand(enum.Enum):
     HARD_REBOOT = "HARD_REBOOT"
     # Kill and re-run the current benchmark on the DUT, without power cycling it
     SOFT_REBOOT = "SOFT_REBOOT"
+    # Beam status notifications sent by some DUT firmwares (e.g. the Versal bare-metal app) around
+    # a beam-on/beam-off window. Handlers are currently stubs (log-only) - see README.md, "DUT-requested commands".
+    OPEN_BEAM = "OPEN_BEAM"
+    CLOSE_BEAM = "CLOSE_BEAM"
 
     @classmethod
     def from_string(cls, name: str) -> typing.Optional["DUTCommand"]:
