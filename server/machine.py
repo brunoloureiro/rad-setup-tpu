@@ -70,6 +70,12 @@ class Machine(threading.Thread):
     # dut_deployment.py.
     __DEFAULT_DUT_MODE = "active"
     __SUPPORTED_DUT_MODES = ("active", "passive")
+    # Default receive_port when a machine config does not specify one: 0 lets the OS pick a free
+    # ephemeral port. Only meaningful to omit for DUTs that never send UDP log traffic back to the
+    # server (e.g. a bare-metal DUT with no network stack at all).
+    __DEFAULT_RECEIVE_PORT = 0
+    # Default test_header for a passive DUT configured without 'json_files' (see 'test_name' below)
+    __DEFAULT_TEST_HEADER = ""
     # Default delay between receiving a '#ABORT'/'#END' message and restarting the app, unless
     # overridden per-DUT via 'restart_interval'
     __DEFAULT_RESTART_INTERVAL = 1.0
@@ -106,24 +112,40 @@ class Machine(threading.Thread):
         # load yaml file
         with open(configuration_file, 'r') as fp:
             machine_parameters = yaml.load(fp, Loader=yaml.SafeLoader)
-        self.__dut_ip = machine_parameters["ip"]
         self.__dut_hostname = machine_parameters["hostname"]
-        self.__dut_username = machine_parameters["username"]
-        self.__dut_password = machine_parameters["password"]
         self.__switch_ip = machine_parameters["power_switch_ip"]
         self.__switch_port = machine_parameters["power_switch_port"]
         self.__switch_model = machine_parameters["power_switch_model"]
         self.__boot_waiting_time = machine_parameters["boot_waiting_time"]
         self.__max_timeout_time = machine_parameters["max_timeout_time"]
-        self.__receiving_port = machine_parameters["receive_port"]
         self.__disable_os_soft_reboot = False
         if "disable_os_soft_reboot" in machine_parameters:
             self.__disable_os_soft_reboot = machine_parameters["disable_os_soft_reboot"] is True
 
         # Console transport used to log into the DUT and issue commands (telnet or jtag)
-        self.__connection_type = machine_parameters.get("connection_type", self.__DEFAULT_CONNECTION_TYPE)
+        self.__connection_type = machine_parameters.get("connection_type", self.__DEFAULT_CONNECTION_TYPE).lower()
         self.__jtag_port = machine_parameters.get("jtag_port")
         self.__jtag_baudrate = machine_parameters.get("jtag_baudrate", self.__DEFAULT_JTAG_BAUDRATE)
+
+        # ip: only actually needed to open a "telnet" connection (and for the boot-time ping
+        # check, also telnet-only - see __wait_for_booting). Optional otherwise: a "jtag" DUT
+        # connects over jtag_port instead and never dials 'ip', so it is only used there as a
+        # free-form display label passed through to the power-switch calls' logging.
+        self.__dut_ip = machine_parameters.get("ip")
+        if self.__connection_type == "telnet" and not self.__dut_ip:
+            raise ValueError("connection_type 'telnet' requires 'ip' to be set in the machine config")
+
+        # receive_port: the port libLogHelper on the DUT sends its UDP log traffic to. For a
+        # "telnet" (network) DUT this must be a fixed, known-in-advance value - both sides (this
+        # server and the DUT's own libLogHelper config) have to agree on it, so it cannot be left
+        # to an OS-assigned ephemeral port. Only optional for "jtag" DUTs that may have no network
+        # stack at all to send UDP from (e.g. a bare-metal DUT driven purely over a JTAG probe),
+        # where it defaults to 0 (OS-assigned ephemeral port) since no value could matter anyway.
+        self.__receiving_port = machine_parameters.get("receive_port")
+        if self.__connection_type == "telnet" and self.__receiving_port is None:
+            raise ValueError("connection_type 'telnet' requires 'receive_port' to be set in the machine config")
+        if self.__receiving_port is None:
+            self.__receiving_port = self.__DEFAULT_RECEIVE_PORT
 
         # dut_mode selects how the app is (re)started: "active" (default) DUTs run an OS and are
         # driven by console kill+run commands; "passive" (bare-metal) DUTs have no console/shell
@@ -133,6 +155,13 @@ class Machine(threading.Thread):
         if self.__dut_mode not in self.__SUPPORTED_DUT_MODES:
             raise ValueError(f"Unsupported dut_mode '{self.__dut_mode}', expected one of "
                              f"{self.__SUPPORTED_DUT_MODES}")
+
+        # username/password: only needed to log into a console, which only ever happens for
+        # "active" DUTs (see __dut_login). Optional/unused for "passive" (bare-metal) DUTs.
+        self.__dut_username = machine_parameters.get("username")
+        self.__dut_password = machine_parameters.get("password")
+        if self.__dut_mode == "active" and (self.__dut_username is None or self.__dut_password is None):
+            raise ValueError("dut_mode 'active' requires 'username' and 'password' to be set in the machine config")
 
         self.__redeploy_cmd = machine_parameters.get("redeploy_cmd")
         self.__redeploy_timeout = machine_parameters.get("redeploy_timeout", DEFAULT_REDEPLOY_TIMEOUT)
@@ -145,9 +174,25 @@ class Machine(threading.Thread):
         # Delay between receiving '#ABORT'/'#END' and restarting the app, per-DUT configurable
         self.__restart_interval = machine_parameters.get("restart_interval", self.__DEFAULT_RESTART_INTERVAL)
 
-        # Factory to manage the command execution
-        self.__command_factory = CommandFactory(json_files_list=machine_parameters["json_files"],
-                                                logger_name=logger_name)
+        # Factory to manage the command execution. json_files is only actually needed to obtain
+        # the console kill/run commands used by "active" DUTs; "passive" DUTs only need it for the
+        # test_name/header used to name DUTLogging files (and the optional command_window
+        # rotation), so they may instead supply 'test_name'/'test_header' directly and skip
+        # json_files/CommandFactory entirely.
+        self.__command_factory = None
+        self.__test_name = None
+        self.__test_header = None
+        json_files = machine_parameters.get("json_files")
+        if json_files:
+            self.__command_factory = CommandFactory(json_files_list=json_files, logger_name=logger_name)
+        elif self.__dut_mode == "active":
+            raise ValueError("dut_mode 'active' requires 'json_files' to be set in the machine config")
+        else:
+            self.__test_name = machine_parameters.get("test_name")
+            self.__test_header = machine_parameters.get("test_header", self.__DEFAULT_TEST_HEADER)
+            if not self.__test_name:
+                raise ValueError("dut_mode 'passive' requires either 'json_files' or 'test_name' "
+                                 "to be set in the machine config")
 
         # Dispatcher for commands the DUT itself requests via '#CMD <NAME>' messages
         self.__command_dispatcher = DUTCommandDispatcher(logger_name=self.__logger_name)
@@ -164,6 +209,9 @@ class Machine(threading.Thread):
         self.__messages_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.__messages_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.__messages_socket.bind((server_ip, self.__receiving_port))
+        # If receive_port was omitted/0, record the actual OS-assigned port (only used for
+        # display in __str__ - nothing else depends on which port was actually bound).
+        self.__receiving_port = self.__messages_socket.getsockname()[1]
         self.__messages_socket.settimeout(self.__max_timeout_time)
 
         # Variables to control rebooting (soft app and soft OS) process
@@ -234,7 +282,7 @@ class Machine(threading.Thread):
 
                 self.__logger.debug(f"{connection_type} - Connection from {self}")
 
-                if self.__command_factory.is_command_window_timed_out:
+                if self.__command_factory is not None and self.__command_factory.is_command_window_timed_out:
                     self.__logger.info(
                         f"Benchmark exceeded the command execution window, executing another one now on {self}.")
                     self.__soft_app_reboot(previous_log_end_status=EndStatus.NORMAL_END)
@@ -297,9 +345,14 @@ class Machine(threading.Thread):
             self.__logger.info(f"MAXIMUM_APP_REBOOT_REACHED on {self}")
             return ErrorCodes.MAXIMUM_APP_REBOOT_REACHED
 
-        # self.__command_factory produces the commands that will be executed
-        # The commands are already encoded
-        cmd_line_run, cmd_kill, test_name, header = self.__command_factory.get_commands_and_test_info()
+        # self.__command_factory (when configured via 'json_files') produces the commands that
+        # will be executed, plus the test_name/header used to name the DUTLogging file. A passive
+        # DUT configured without 'json_files' instead supplies test_name/header directly
+        # ('test_name'/'test_header' in its YAML config) and has no console commands to run.
+        if self.__command_factory is not None:
+            cmd_line_run, cmd_kill, test_name, header = self.__command_factory.get_commands_and_test_info()
+        else:
+            cmd_line_run, cmd_kill, test_name, header = None, None, self.__test_name, self.__test_header
 
         if self.__dut_mode == "passive":
             return self.__passive_redeploy(test_name=test_name, header=header,

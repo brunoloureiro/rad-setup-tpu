@@ -1,18 +1,28 @@
 # Configuration example for carolk401 device
 
 # the IP address of the machine
+# Required when connection_type is "telnet" (the default - see below), since that transport
+# dials this address directly. Optional otherwise: a "jtag" DUT connects over jtag_port instead
+# and never dials 'ip' - if omitted there, it is only used as a free-form display label.
 ip:  192.168.195.6
 
 # Port that the device will send data
+# Required when connection_type is "telnet" (the default - see below): the DUT's libLogHelper
+# config and this server both need to agree on a fixed, known-in-advance port, so it cannot be
+# left to an OS-assigned ephemeral one. Optional otherwise - defaults to 0 (OS-assigned ephemeral
+# port) for "jtag" DUTs that may have no network stack at all to ever send UDP log traffic from.
 receive_port: 1024
 
 # hostname the hostname of the machine, that must contains the device in the name
 hostname: caroldummy
 
 # username
+# Required when dut_mode is "active" (the default - see below), since a console login is
+# performed. Optional/unused when dut_mode is "passive" (no console is ever logged into).
 username: carol
 
 # password of the device
+# Same requirement as 'username' above: only needed for dut_mode "active".
 password: qwerty0
 
 # power_switch_ip IP address of the power switch
@@ -69,7 +79,16 @@ connection_type: telnet
 # restart_interval: !!float 1.0
 
 # Json files that contain the commands
+# Required when dut_mode is "active" (supplies the console kill/run commands). Optional when
+# dut_mode is "passive": if omitted there, 'test_name' (required) / 'test_header' (optional,
+# defaults to "") below are used instead to name DUTLogging files, and the command_window
+# rotation/timeout is skipped entirely (there are no benchmarks to rotate between).
 json_files: [
 #  "/home/fernando/git_research/radiation-setup/machines_cfgs/cuda_micro.json",
     "/home/fernando/git_research/radiation-setup/machines_cfgs/dummy.json",
 ]
+
+# test_name / test_header: only used (and 'test_name' required) when dut_mode is "passive" and
+# 'json_files' is omitted - see above.
+# test_name: versal_bm
+# test_header: Versal Bare-Metal passive DUT, no json_files configured

@@ -15,13 +15,8 @@ receive_port: !!int 1024
 # hostname the hostname of the machine, that must contains the device in the name
 hostname: versal_bm_ethernet
 
-# username
-# Unused: dut_mode is "passive", so no console login is ever performed for this DUT.
-username: N/A
-
-# password of the device
-# Unused: dut_mode is "passive", so no console login is ever performed for this DUT.
-password: N/A
+# username / password: omitted - unused, since dut_mode is "passive" and no console login is ever
+# performed for this DUT (see server/machine.py).
 
 # power_switch_ip IP address of the power switch
 power_switch_ip: 192.168.0.100
@@ -87,10 +82,8 @@ redeploy_timeout: !!int 15
 # restarting its app. Defaults to 1.0 if omitted.
 # restart_interval: !!float 1.0
 
-# Json files that contain the commands
-# NOTE: exec/killcmd are unused for a passive DUT (no console commands are issued); only the
-# codename/header fields (used for DUTLogging file naming) matter here. Pointed at the existing
-# repo dummy.json placeholder - swap in a dedicated benchmark definition if/when one exists.
-json_files: [
-    "/home/loureiro/repos/radiation-setup-jtag/machines_cfgs/dummy.json",
-]
+# json_files: not used here - no benchmark rotation is needed, and this DUT has no console to
+# issue exec/killcmd on anyway. Since dut_mode is "passive" and json_files is omitted, test_name
+# (required) and test_header (optional) below are used instead to name DUTLogging files.
+test_name: versal_bm_ethernet
+test_header: Versal Bare-Metal DUT, passive mode, over Ethernet

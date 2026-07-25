@@ -3,31 +3,14 @@
 # dut_mode is "passive": this board has no OS/shell. Its app starts running automatically as soon
 # as it is (re)loaded via 'redeploy_cmd' below (an xsct/JTAG-debugger deployment script), instead
 # of being started by logging into a console and issuing kill/run commands.
-
-# the IP address of the machine
-# Not meaningful here: this DUT is fully bare-metal (no network stack) and dut_mode is "passive",
-# so no ping/console-login boot check and no console login is ever performed for it (see
-# machine.py __wait_for_booting/__soft_app_reboot). 'ip' is only used as a log/display label and
-# as the (unused) address argument passed to the power switch calls. Placeholder - adjust if this
-# DUT ever gets a real management IP.
-ip: N/A
-
-# Port that the device will send data
-# NOTE: placeholder - must be unique per machine thread (each binds its own UDP socket on this
-# port). Not specified in the request; pick a free port distinct from other configured DUTs
-# (e.g. distinct from versal_bm_eth_passive.yaml's 1024) before deploying.
-receive_port: !!int 1025
+#
+# This DUT is fully bare-metal with no network stack at all, so 'ip', 'receive_port', 'username'
+# and 'password' are all omitted below - none of them are used for a dut_mode "passive" DUT with
+# connection_type "jtag" (see server/machine.py): no console login is ever performed, no UDP log
+# traffic will ever arrive from this board, and 'ip' would only ever be a display label.
 
 # hostname the hostname of the machine, that must contains the device in the name
 hostname: versal_bm_jtag
-
-# username
-# Unused: dut_mode is "passive", so no console login is ever performed for this DUT.
-username: N/A
-
-# password of the device
-# Unused: dut_mode is "passive", so no console login is ever performed for this DUT.
-password: N/A
 
 # power_switch_ip IP address of the power switch
 power_switch_ip: 192.168.0.100
@@ -92,10 +75,8 @@ redeploy_timeout: !!int 15
 # restarting its app. Defaults to 1.0 if omitted.
 # restart_interval: !!float 1.0
 
-# Json files that contain the commands
-# NOTE: exec/killcmd are unused for a passive DUT (no console commands are issued); only the
-# codename/header fields (used for DUTLogging file naming) matter here. Pointed at the existing
-# repo dummy.json placeholder - swap in a dedicated benchmark definition if/when one exists.
-json_files: [
-    "/home/loureiro/repos/radiation-setup-jtag/machines_cfgs/dummy.json",
-]
+# json_files: not used here - no benchmark rotation is needed, and this DUT has no console to
+# issue exec/killcmd on anyway. Since dut_mode is "passive" and json_files is omitted, test_name
+# (required) and test_header (optional) below are used instead to name DUTLogging files.
+test_name: versal_bm_jtag
+test_header: Versal Bare-Metal DUT, passive mode, over JTAG UART bridge
