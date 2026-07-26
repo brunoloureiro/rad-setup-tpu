@@ -21,6 +21,7 @@ import abc
 import logging
 import os
 import socket
+import threading
 import time
 import typing
 
@@ -84,16 +85,30 @@ class EthernetMessageChannel(MessageChannel):
 class JTAGMessageChannel(MessageChannel):
     """ Receives DUT messages over a JTAG probe's serial/UART bridge, using pyserial """
 
-    def __init__(self, port: str, baudrate: int, timeout: float, logger_name: str):
+    # Hard-coded number of reconnect attempts made after noticing the JTAG serial port has
+    # disconnected (failing to open it, or an error while reading), before giving up and letting
+    # Machine.run()'s regular timeout-escalation logic (redeploy/reboot) take over. Not
+    # configurable per-DUT, similar to e.g. Machine's __MAX_LOGIN_TRIES.
+    MAX_JTAG_RECONNECT_ATTEMPTS = 5
+
+    def __init__(self, port: str, baudrate: int, timeout: float, logger_name: str,
+                redeploy_on_disconnect_delay: float = 1.0,
+                stop_event: typing.Optional[threading.Event] = None):
         super().__init__(timeout=timeout, logger_name=logger_name)
         self.__port = port
         self.__baudrate = baudrate
         self.__serial = None
         # Bytes already read from the port that have not yet been split into a complete message
         self.__buffer = b""
-        # Avoids re-logging the same "port missing" error on every receive() call while the probe
-        # stays disconnected
+        # Avoids re-logging the same "port missing" error on every reconnect attempt while the
+        # probe stays disconnected
         self.__port_missing_logged = False
+        # Total time budget (seconds) spent retrying a reconnect after a disconnect is noticed,
+        # spread evenly across MAX_JTAG_RECONNECT_ATTEMPTS attempts - see __reconnect_with_retries.
+        self.__redeploy_on_disconnect_delay = redeploy_on_disconnect_delay
+        # Used for an interruptible wait between reconnect attempts (see Machine's convention of
+        # never time.sleep()-ing where a stop_event.wait() can be interrupted on shutdown instead)
+        self.__stop_event = stop_event
 
     def open(self) -> None:
         import serial
@@ -125,14 +140,15 @@ class JTAGMessageChannel(MessageChannel):
         # The port was closed by a previous disconnect (see except clause below) - try to reopen
         # it before reading. A hard/soft reboot may have re-enumerated the USB adapter by now (see
         # DEBUG_PROGRESS.md: a board reset can briefly drop power to the onboard FTDI chip and
-        # make it disappear/reappear as a device node). If it's still not there, treat this like a
-        # regular receive timeout so Machine.run()'s existing timeout-escalation logic (soft app
-        # reboot / redeploy -> soft OS reboot -> hard power cycle) kicks in instead of crashing the
-        # Machine thread.
+        # make it disappear/reappear as a device node). If it's still not there after
+        # MAX_JTAG_RECONNECT_ATTEMPTS retries, treat this like a regular receive timeout so
+        # Machine.run()'s existing timeout-escalation logic (soft app reboot / redeploy -> soft OS
+        # reboot -> hard power cycle) kicks in instead of crashing the Machine thread.
         if self.__serial is None:
-            self.__attempt_reopen()
-            if self.__serial is None:
-                raise TimeoutError(f"JTAG serial port {self.__port} is unavailable")
+            if not self.__reconnect_with_retries():
+                raise TimeoutError(
+                    f"JTAG serial port {self.__port} is unavailable after "
+                    f"{self.MAX_JTAG_RECONNECT_ATTEMPTS} reconnect attempt(s)")
 
         deadline = time.time() + self._timeout
         while b"\n" not in self.__buffer:
@@ -143,14 +159,44 @@ class JTAGMessageChannel(MessageChannel):
                 chunk = self.__serial.read(waiting if waiting else 1)
             except (serial.SerialException, OSError) as e:
                 self._logger.error(
-                    f"JTAG serial port {self.__port} disconnected while reading ({e}) - closing it; "
-                    f"will attempt to reopen it on the next receive() call")
+                    f"JTAG serial port {self.__port} disconnected while reading ({e}) - closing it "
+                    f"and attempting to reconnect")
                 self.__close_serial()
-                raise TimeoutError(f"JTAG serial port {self.__port} disconnected: {e}") from e
+                if not self.__reconnect_with_retries():
+                    raise TimeoutError(
+                        f"JTAG serial port {self.__port} disconnected and did not come back after "
+                        f"{self.MAX_JTAG_RECONNECT_ATTEMPTS} reconnect attempt(s): {e}") from e
+                continue
             self.__buffer += chunk
 
         line, self.__buffer = self.__buffer.split(b"\n", 1)
         return line.rstrip(b"\r")
+
+    def __reconnect_with_retries(self) -> bool:
+        """ Try to reopen the JTAG serial port, retrying up to MAX_JTAG_RECONNECT_ATTEMPTS times.
+        The redeploy_on_disconnect_delay budget (config field 'redeploy_on_disconnect_delay',
+        default 1s) is spread evenly across those attempts - i.e. each retry waits
+        redeploy_on_disconnect_delay / MAX_JTAG_RECONNECT_ATTEMPTS seconds - so brief adapter
+        hiccups (see DEBUG_PROGRESS.md) can be absorbed here without escalating all the way to
+        Machine.run()'s redeploy/reboot logic.
+        :return: True if the port was reopened, False if it is still unavailable after all attempts
+        """
+        retry_delay = self.__redeploy_on_disconnect_delay / self.MAX_JTAG_RECONNECT_ATTEMPTS
+        for attempt in range(1, self.MAX_JTAG_RECONNECT_ATTEMPTS + 1):
+            self.__attempt_reopen()
+            if self.__serial is not None:
+                if attempt > 1:
+                    self._logger.info(f"Reconnected to JTAG serial port {self.__port} on attempt {attempt}")
+                return True
+            if attempt == self.MAX_JTAG_RECONNECT_ATTEMPTS:
+                break
+            if self.__stop_event is not None and self.__stop_event.is_set():
+                break
+            if self.__stop_event is not None:
+                self.__stop_event.wait(retry_delay)
+            else:
+                time.sleep(retry_delay)
+        return False
 
     def __close_serial(self) -> None:
         if self.__serial is not None:
@@ -189,7 +235,7 @@ def create_message_channel(connection_type: str, timeout: float, logger_name: st
     """ Build a fresh (not-yet-opened) MessageChannel for the given transport
     :param connection_type: "ethernet" or "jtag"
     :param transport_kwargs: for "ethernet": server_ip, receive_port. For "jtag": jtag_port,
-        jtag_baudrate.
+        jtag_baudrate, and optionally redeploy_on_disconnect_delay, stop_event.
     :raises ValueError: if connection_type is not supported
     """
     connection_type = connection_type.lower()
@@ -198,7 +244,9 @@ def create_message_channel(connection_type: str, timeout: float, logger_name: st
                                       receive_port=transport_kwargs["receive_port"],
                                       timeout=timeout, logger_name=logger_name)
     if connection_type == "jtag":
-        return JTAGMessageChannel(port=transport_kwargs["jtag_port"],
-                                  baudrate=transport_kwargs["jtag_baudrate"],
-                                  timeout=timeout, logger_name=logger_name)
+        return JTAGMessageChannel(
+            port=transport_kwargs["jtag_port"], baudrate=transport_kwargs["jtag_baudrate"],
+            timeout=timeout, logger_name=logger_name,
+            redeploy_on_disconnect_delay=transport_kwargs.get("redeploy_on_disconnect_delay", 1.0),
+            stop_event=transport_kwargs.get("stop_event"))
     raise ValueError(f"Unsupported connection_type '{connection_type}', expected 'ethernet' or 'jtag'")

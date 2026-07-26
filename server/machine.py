@@ -66,6 +66,11 @@ class Machine(threading.Thread):
     __SUPPORTED_CONNECTION_TYPES = ("ethernet", "jtag")
     # Default baud rate for the JTAG serial/UART bridge when a machine config does not specify one
     __DEFAULT_JTAG_BAUDRATE = 115200
+    # Default total time (seconds) JTAGMessageChannel spends retrying a reconnect after noticing
+    # the JTAG serial port disconnected, when a machine config does not specify
+    # 'redeploy_on_disconnect_delay'. Spread across JTAGMessageChannel.MAX_JTAG_RECONNECT_ATTEMPTS
+    # attempts - see dut_message_channel.py.
+    __DEFAULT_REDEPLOY_ON_DISCONNECT_DELAY = 1.0
     # Default dut_mode when a machine config does not specify one: an OS-enabled DUT driven by
     # console (Telnet) kill+run commands. "passive" is the bare-metal counterpart: no console/
     # shell, the app runs automatically once (re)loaded - see dut_deployment.py. Independent of
@@ -180,6 +185,14 @@ class Machine(threading.Thread):
         if self.__connection_type == "jtag" and not self.__jtag_port:
             raise ValueError("connection_type 'jtag' requires 'jtag_port' to be set in the machine config")
 
+        # redeploy_on_disconnect_delay: only meaningful for connection_type "jtag" - total time
+        # (seconds) JTAGMessageChannel spends retrying a reconnect after noticing the JTAG serial
+        # port disconnected, spread across JTAGMessageChannel.MAX_JTAG_RECONNECT_ATTEMPTS
+        # (hard-coded) attempts before giving up and letting the regular timeout-escalation logic
+        # below (soft app reboot/redeploy -> soft OS reboot -> hard power cycle) take over.
+        self.__redeploy_on_disconnect_delay = machine_parameters.get(
+            "redeploy_on_disconnect_delay", self.__DEFAULT_REDEPLOY_ON_DISCONNECT_DELAY)
+
         self.__redeploy_cmd = machine_parameters.get("redeploy_cmd")
         self.__redeploy_timeout = machine_parameters.get("redeploy_timeout", DEFAULT_REDEPLOY_TIMEOUT)
         if self.__dut_mode == "passive":
@@ -230,7 +243,9 @@ class Machine(threading.Thread):
         self.__message_channel: MessageChannel = create_message_channel(
             connection_type=self.__connection_type, timeout=self.__max_timeout_time,
             logger_name=self.__logger_name, server_ip=server_ip, receive_port=self.__receiving_port,
-            jtag_port=self.__jtag_port, jtag_baudrate=self.__jtag_baudrate)
+            jtag_port=self.__jtag_port, jtag_baudrate=self.__jtag_baudrate,
+            redeploy_on_disconnect_delay=self.__redeploy_on_disconnect_delay,
+            stop_event=self.__stop_event)
         self.__message_channel.open()
 
         # Variables to control rebooting (soft app and soft OS) process

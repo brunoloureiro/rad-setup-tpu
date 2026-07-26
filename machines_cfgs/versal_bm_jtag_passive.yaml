@@ -50,10 +50,18 @@ connection_type: jtag
 
 # jtag_port / jtag_baudrate: only used when connection_type is "jtag". jtag_port is the serial
 # device exposed by the JTAG probe's UART bridge (e.g. an FTDI-based adapter) that the server reads
-# DUT messages from (one '<ecc status byte><text>' message per line, matching libLogHelper's UDP
-# wire format - see dut_message_channel.py), jtag_baudrate defaults to 115200 if omitted.
+# DUT messages from (one ASCII-text message per line, matching libLogHelper's UDP wire format -
+# see dut_message_channel.py), jtag_baudrate defaults to 115200 if omitted.
 jtag_port: /dev/ttyUSB1
 # jtag_baudrate: !!int 115200
+
+# redeploy_on_disconnect_delay: only used when connection_type is "jtag". Total time (seconds)
+# JTAGMessageChannel spends retrying a reconnect after noticing the JTAG serial port disconnected
+# (e.g. the USB/FTDI adapter briefly dropping out on a board reset - see DEBUG_PROGRESS.md),
+# spread evenly across JTAGMessageChannel.MAX_JTAG_RECONNECT_ATTEMPTS (hard-coded, defaults to 5)
+# attempts. Only if the port is still unavailable after all attempts does the server escalate to
+# its regular redeploy/reboot logic. Defaults to 1.0 if omitted.
+# redeploy_on_disconnect_delay: !!float 1.0
 
 # dut_mode: how the app is (re)started on this DUT.
 # - "active" (default, used if omitted): an OS-enabled DUT reachable over a Telnet console;

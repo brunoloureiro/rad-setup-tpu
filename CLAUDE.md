@@ -143,13 +143,20 @@ retry loop — keep that pattern when adding new transports.
 `JTAGMessageChannel.receive()` also treats a mid-run serial disconnect (e.g. the USB JTAG/UART
 adapter dropping out, which can happen when a board reset briefly cuts power to the onboard FTDI
 chip) the same way as a plain timeout: it catches `serial.SerialException`/`OSError` from the
-read, closes the now-broken `serial.Serial` handle, and raises `TimeoutError` instead of letting
-the exception escape and crash the Machine thread. The next `receive()` call tries to reopen the
-port before reading again (`__attempt_reopen`), so it self-heals once the device node reappears.
-Either way, this feeds into `Machine.run()`'s existing timeout-escalation logic (soft app
-reboot/redeploy -> soft OS reboot -> hard power cycle) exactly like an unresponsive DUT would —
-for a `dut_mode: passive` DUT this means `redeploy_cmd` and a power-switch cycle, matching the
-active-mode Telnet-unreachable case.
+read and closes the now-broken `serial.Serial` handle, but rather than immediately raising
+`TimeoutError`, it first tries `__reconnect_with_retries()` — up to
+`JTAGMessageChannel.MAX_JTAG_RECONNECT_ATTEMPTS` (hard-coded, defaults to 5) reopen attempts,
+spaced `redeploy_on_disconnect_delay / MAX_JTAG_RECONNECT_ATTEMPTS` seconds apart (`stop_event`,
+threaded down from `Machine`, makes that wait interruptible on shutdown). `redeploy_on_disconnect_delay`
+is a per-DUT YAML field (only meaningful for `connection_type: jtag`, defaults to 1.0s if
+omitted) — it's the total time budget spent absorbing a brief adapter hiccup before giving up.
+Only if the port is still unavailable after all attempts does `receive()` raise `TimeoutError`,
+which feeds into `Machine.run()`'s existing timeout-escalation logic (soft app reboot/redeploy ->
+soft OS reboot -> hard power cycle) exactly like an unresponsive DUT would — for a
+`dut_mode: passive` DUT this means `redeploy_cmd` and a power-switch cycle, matching the
+active-mode Telnet-unreachable case. If reconnection does succeed (either during this retry loop
+or on a later `receive()` call, since a still-`None` `__serial` is retried every call), it
+self-heals without ever needing to escalate.
 
 ### DUT-requested commands (`server/dut_commands.py`)
 
