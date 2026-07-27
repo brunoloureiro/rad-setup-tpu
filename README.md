@@ -11,12 +11,15 @@ This server runs outside the beam room and communicates with devices through a n
 
 ## 🚀 Features
 
-Each DUT is configured along two independent axes:
+Each DUT is configured along three independent axes:
 
 - **`dut_mode`: `active` or `passive`** — how the app is (re)started. `active` DUTs run an OS and
-  are driven over Telnet (login + kill/run commands from `json_files`). `passive` (bare-metal)
+  are driven over a console (login + kill/run commands from `json_files`). `passive` (bare-metal)
   DUTs have no OS/shell; the server instead runs a local `redeploy_cmd` (e.g. a JTAG/xsct script)
   to (re)load and start the app, immediately after power-on.
+- **`console_type`: `telnet` or `jtag`** — only meaningful for `dut_mode: active` (`passive` DUTs
+  never open a console). `telnet` (default) is a network Telnet connection. `jtag` logs in over a
+  JTAG probe's serial/UART bridge instead, for DUTs with no network path to a console.
 - **`connection_type`: `ethernet` or `jtag`** — how the server listens for DUT status/log messages
   (`#IT`, `#LOGFILE`, `#CMD`, ...). `ethernet` (default) is a UDP socket bound to
   `server_ip:receive_port`. `jtag` reads the JTAG probe's serial/UART bridge instead, for DUTs with
@@ -28,8 +31,8 @@ Any combination is valid - see [`CLAUDE.md`](CLAUDE.md) for the full architectur
 - Saves received data in organized files with timestamps and addresses
 - Configurable experiment parameters through YAML files
 - Integrates with [libLogHelper](https://github.com/radhelper/libLogHelper) on the client side
-- `active` DUTs: Telnet console for remote command execution. `passive` DUTs: a local redeploy
-  command (e.g. driving a JTAG probe) to (re)load and start the app
+- `active` DUTs: Telnet or JTAG-serial console for remote command execution. `passive` DUTs: a
+  local redeploy command (e.g. driving a JTAG probe) to (re)load and start the app
 - DUTs can request server-side actions (e.g. a power cycle) at runtime through a `#CMD` message
 
 ---
@@ -69,15 +72,16 @@ timestamps.
 - PyYAML ≥ 6.0
 - pandas ≥ 1.3.5
 - requests ≥ 2.27.1
-- pyserial ≥ 3.5 (only required if any DUT uses `connection_type: jtag`)
-- Telnet client installed (only required if any DUT uses `dut_mode: active`, the default)
+- pyserial ≥ 3.5 (only required if any DUT uses `connection_type: jtag` and/or `console_type: jtag`)
+- Telnet client installed (only required if any DUT uses `console_type: telnet`, the default for
+  `dut_mode: active`)
 
 **Client requirements**
 
 - `libLogHelper` C++ logging library (includes Python wrapper), for `dut_mode: active` DUTs
-- A Telnet server for running workloads on `dut_mode: active` DUTs
+- A Telnet server (or JTAG-reachable console) for running workloads on `dut_mode: active` DUTs
 - A JTAG probe (e.g. an FTDI-based UART bridge, or a Xilinx-style debug probe driven by
-  `xsct`/`xsdb`) for `dut_mode: passive` DUTs, and/or for `connection_type: jtag` message listening
+  `xsct`/`xsdb`) for `dut_mode: passive` DUTs, and/or for `connection_type: jtag`/`console_type: jtag`
 
 ---
 
@@ -121,9 +125,9 @@ machines: [
 
 ### Machine configuration
 
-Each device under test must have its own configuration file in `machines_cfgs/`. Two independent
-fields, `dut_mode` and `connection_type`, select the combination that fits your DUT - see
-"Features" above for what each value means.
+Each device under test must have its own configuration file in `machines_cfgs/`. Three independent
+fields, `dut_mode`, `console_type`, and `connection_type`, select the combination that fits your
+DUT - see "Features" above for what each value means.
 
 **`dut_mode: active` (default), `connection_type: ethernet` (default)** - an OS-based DUT reachable
 over Telnet, reporting status over UDP. This is the original/default mode:
@@ -147,12 +151,28 @@ json_files: [
 ```
 
 **`connection_type: jtag`** - listen for DUT status/log messages over a JTAG probe's serial/UART
-bridge instead of UDP (independent of `dut_mode`; this only changes how messages are *received*):
+bridge instead of UDP (independent of `dut_mode`/`console_type`; this only changes how messages are
+*received*):
 
 ```yaml
 connection_type: jtag
 jtag_port: /dev/ttyUSB0
 jtag_baudrate: !!int 115200   # optional, defaults to 115200
+```
+
+**`dut_mode: active`, `console_type: jtag`** - an OS-based DUT with no network path to a console
+(e.g. an isolated bring-up board), logged into over a JTAG probe's serial/UART bridge instead of
+Telnet. `ip` is not needed; `username`/`password` still are. Independent of `connection_type` -
+this DUT can still report status over Ethernet if its network stack works, even though its console
+doesn't have one:
+
+```yaml
+console_type: jtag
+console_jtag_port: /dev/ttyUSB2
+console_jtag_baudrate: !!int 115200   # optional, defaults to 115200
+username: carol
+password: qwerty0
+connection_type: ethernet   # or jtag, independently - see above
 ```
 
 **`dut_mode: passive`** - a bare-metal DUT with no OS/shell. Instead of Telnet kill/run commands,

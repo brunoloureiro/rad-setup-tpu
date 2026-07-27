@@ -15,12 +15,20 @@ Each DUT is configured along **two independent axes** (both per-DUT YAML fields,
 files" below):
 
 - **`dut_mode`: `active` vs `passive`** — how the app is (re)started.
-  - `active` (default): the DUT runs an OS/shell. The server logs into it over **Telnet** (`ip`,
-    `username`, `password` in the DUT's YAML) and issues kill/run commands (from the JSON files
-    listed in `json_files`). See "Machine lifecycle" and "DUT console connection" below.
+  - `active` (default): the DUT runs an OS/shell. The server logs into its console and issues
+    kill/run commands (from the JSON files listed in `json_files`). See "Machine lifecycle" and
+    "DUT console connection" below.
   - `passive`: the DUT is bare-metal (no OS/shell). The server runs a local command (`redeploy_cmd`
     in the DUT's YAML, e.g. a TCL script driven through a JTAG debugger) to (re)load and start the
     app. See "Passive DUT deployment" below.
+- **`console_type`: `telnet` vs `jtag`** — only meaningful for `dut_mode: active` (a `passive` DUT
+  never opens a console at all); selects the transport used to log into the DUT and issue kill/run
+  commands.
+  - `telnet` (default): a network Telnet connection, requires `ip`, `username`, `password` in the
+    DUT's YAML.
+  - `jtag`: the JTAG probe's serial/UART bridge (`console_jtag_port`/`console_jtag_baudrate` in the
+    DUT's YAML), for DUTs with no network path to a console at all; still requires `username`,
+    `password` but not `ip`. See "DUT console connection" below.
 - **`connection_type`: `ethernet` vs `jtag`** — how the server *listens for DUT status/log
   messages* (`#IT`, `#LOGFILE`, `#CMD`, ...).
   - `ethernet` (default): a UDP socket bound to `server_ip:receive_port`, requires the DUT to have
@@ -28,11 +36,17 @@ files" below):
   - `jtag`: the JTAG probe's serial/UART bridge (`jtag_port`/`jtag_baudrate` in the DUT's YAML),
     for DUTs with no network stack at all. See "DUT message channel" below.
 
-These two axes are orthogonal — e.g. a `passive` bare-metal DUT can report status over `ethernet`
-if it happens to have a network stack (`machines_cfgs/versal_bm_eth_passive.yaml`) or over `jtag`
-if it doesn't (`machines_cfgs/versal_bm_jtag_passive.yaml`); an `active` OS-based DUT almost always
-uses `ethernet`, since it has a network stack for Telnet anyway. There is currently no config that
-pairs `active` with `jtag`, but nothing in `Machine` assumes otherwise.
+These three axes are all independent — e.g. a `passive` bare-metal DUT can report status over
+`ethernet` if it happens to have a network stack (`machines_cfgs/versal_bm_eth_passive.yaml`) or
+over `jtag` if it doesn't (`machines_cfgs/versal_bm_jtag_passive.yaml`); an `active` OS-based DUT
+almost always uses `console_type: telnet` and `connection_type: ethernet`, since it has a network
+stack anyway, but a DUT whose only console path is through a JTAG probe's UART bridge (no network
+route to a Telnet console) can set `console_type: jtag` while still reporting status over
+`connection_type: ethernet`, if the board's network stack is otherwise functional - `console_type`
+and `connection_type` may independently point at the same or different serial devices/JTAG probes.
+`console_type` has no effect for `dut_mode: passive` (no console is ever opened), and
+`connection_type: jtag` is unrelated to `console_type: jtag` even though both may reuse the phrase
+"JTAG probe's serial/UART bridge" - one is the message channel, the other is the console.
 
 ## Running
 
@@ -59,9 +73,17 @@ reference hardcoded lab IPs and hostnames (e.g. `tests/test_machine.py`, `test_r
 sleeps for 500s and expects a real DUT to be reachable. `test_command_factory.py` and
 `test_dut_logging.py` also currently fail out of the box against `logging_setup`'s current
 signature (missing the required `enable_curses` arg) — pre-existing breakage, not caused by any
-particular change. `test_dut_commands.py` is fully hermetic (pure dispatcher logic, no I/O). Don't
-expect the hardware-dependent tests to pass in a sandboxed/CI environment without the physical rig;
-when changing shared logic, reason about correctness directly rather than trusting a green run.
+particular change. `test_dut_commands.py` is fully hermetic (pure dispatcher logic, no I/O).
+`test_dut_connection.py` is also fully hermetic: it exercises `JTAGDUTConnection` (open/login/
+write/read_very_eager/close) against a simulated DUT, using a `FakeSerial` in-memory duplex
+substitute (monkeypatched over `serial.Serial`) driven by a background thread that plays the DUT
+side of a login handshake — no real JTAG hardware, pty, or OS tty involved.
+`test_machine_config.py` is likewise hermetic: it builds `Machine` instances (never `.run()`/
+`.start()`'d) from temp YAML configs to check `console_type`/`console_jtag_port` validation, using
+`connection_type: ethernet` (an in-process UDP socket) so no serial device is ever opened by
+`Machine.__init__` itself. Don't expect the hardware-dependent tests to pass in a sandboxed/CI
+environment without the physical rig; when changing shared logic, reason about correctness
+directly rather than trusting a green run.
 
 ## Architecture
 
@@ -80,12 +102,13 @@ channel) followed by `join()`.
 
 `Machine.run()` is the core loop:
 1. Power the DUT on (`reboot_machine.turn_machine_on`), then wait for it to be ready
-   (`__wait_for_booting`): for `dut_mode: active` this polls via ping + Telnet console login; for
+   (`__wait_for_booting`): for `dut_mode: active` this polls via console login (plus a ping check
+   first, only when `console_type: telnet` - a JTAG console has no IP to ping); for
    `dut_mode: passive` this returns immediately (no console to probe, and `redeploy_cmd` performs
    any board-specific settle waits itself — see "Passive DUT deployment" below).
-2. (Re)start the app for the first time (`__soft_app_reboot`): Telnet kill+run commands for
-   `active` DUTs, or `redeploy_cmd` for `passive` ones (`__passive_redeploy`). Either way this also
-   opens a new `DUTLogging` file for the run.
+2. (Re)start the app for the first time (`__soft_app_reboot`): console kill+run commands (Telnet or
+   JTAG, per `console_type`) for `active` DUTs, or `redeploy_cmd` for `passive` ones
+   (`__passive_redeploy`). Either way this also opens a new `DUTLogging` file for the run.
 3. Loop on `self.__message_channel.receive()` with a timeout (`max_timeout_time` from the
    machine's YAML config) — a UDP `recvfrom` or a JTAG serial read depending on `connection_type`,
    see "DUT message channel" below. Every received message is: (a) appended to the current
@@ -112,14 +135,23 @@ use `self.__stop_event.wait(seconds)` instead (existing code follows this conven
 
 ### DUT console connection (`server/dut_connection.py`)
 
-`Machine` talks to an `active`-mode DUT's console through a `DUTConnection` abstraction — currently
-only `TelnetDUTConnection` (network Telnet), built on four raw I/O primitives
-(`open`/`write`/`read_until`/`read_very_eager`/`close`); the login handshake (username/password/
-shell prompts) is implemented once in `DUTConnection.login()`. `Machine.__dut_login()` builds a
-fresh connection via `create_dut_connection(...)` and logs in. Console access is always Telnet
-regardless of `connection_type` (that field only selects the message-listening transport, see
-below) — adding a second console transport (e.g. SSH) means implementing `DUTConnection`'s four
-primitives and updating `create_dut_connection`; nothing else in `Machine` changes.
+`Machine` talks to an `active`-mode DUT's console through a `DUTConnection` abstraction with two
+implementations selected per-machine by that DUT's `console_type` field (`"telnet"`, the default,
+or `"jtag"`): `TelnetDUTConnection` (network Telnet) and `JTAGDUTConnection` (a serial console
+reached through a JTAG probe's UART bridge, via `pyserial`; config fields `console_jtag_port` and
+optional `console_jtag_baudrate`, kept separate from `connection_type: jtag`'s `jtag_port`/
+`jtag_baudrate` since the two may be different serial devices — see "What this is" above). Both are
+built on four raw I/O primitives (`open`/`write`/`read_until`/`read_very_eager`/`close`); the login
+handshake (username/password/shell prompts) is implemented once in `DUTConnection.login()`.
+`Machine.__dut_login()` builds a fresh connection via `create_dut_connection(...)` and logs in.
+Console access is independent of `connection_type` (that field only selects the message-listening
+transport, see below) — adding a third console transport (e.g. SSH) means implementing
+`DUTConnection`'s four primitives and adding a branch to `create_dut_connection`; nothing else in
+`Machine` changes.
+
+`JTAGDUTConnection.open()` follows the same up-front-validation pattern as `JTAGMessageChannel.open()`
+below: it checks `os.path.exists(console_jtag_port)` before ever touching `pyserial`, so a
+wrong/unplugged port produces one clear log line instead of a bare stack trace or a silent hang.
 
 ### DUT message channel (`server/dut_message_channel.py`)
 
@@ -224,12 +256,14 @@ keep new switch backends behind that lock too.
 
 - `server_parameters.yaml`: top-level — `server_ip`, `server_log_file`, `server_log_store_dir`, and
   the list of `machines` (each an `{enabled, cfg_file}` pair pointing at a per-DUT YAML file).
-- `machines_cfgs/*.yaml`: one per physical DUT, combining the two independent axes described in
+- `machines_cfgs/*.yaml`: one per physical DUT, combining the three independent axes described in
   "What this is" above:
   - `dut_mode: active` (default) or `passive`, plus whichever fields that mode needs: `active`
-    needs `ip`/`username`/`password` (Telnet) and `json_files` (benchmarks); `passive` needs
-    `redeploy_cmd` (and optionally `redeploy_timeout`, `test_name`/`test_header` in place of
-    `json_files`).
+    needs `username`/`password` and `json_files` (benchmarks); `passive` needs `redeploy_cmd` (and
+    optionally `redeploy_timeout`, `test_name`/`test_header` in place of `json_files`).
+  - For `dut_mode: active` only, `console_type: telnet` (default) or `jtag` further selects what
+    the console needs: `telnet` needs `ip`; `jtag` needs `console_jtag_port` (and optionally
+    `console_jtag_baudrate`) instead. Ignored entirely for `dut_mode: passive`.
   - `connection_type: ethernet` (default) or `jtag`, plus whichever fields that transport needs:
     `ethernet` needs `receive_port`; `jtag` needs `jtag_port` (and optionally `jtag_baudrate`).
   - Plus power switch details (`power_switch_ip`/`power_switch_port`/`power_switch_model`) and

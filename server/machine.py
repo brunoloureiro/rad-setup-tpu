@@ -66,15 +66,27 @@ class Machine(threading.Thread):
     __SUPPORTED_CONNECTION_TYPES = ("ethernet", "jtag")
     # Default baud rate for the JTAG serial/UART bridge when a machine config does not specify one
     __DEFAULT_JTAG_BAUDRATE = 115200
+    # Default console_type when a machine config does not specify one: this is the axis that
+    # selects the transport used for a dut_mode: active DUT's console (login + kill/run commands)
+    # - "telnet" (a network Telnet connection) or "jtag" (the JTAG probe's serial/UART bridge). It
+    # is independent of both dut_mode and connection_type above (see dut_connection.py) - e.g. a
+    # DUT can have a JTAG console while still reporting status over Ethernet, if its probe's UART
+    # bridge only carries the console. Meaningless/unused for dut_mode: passive (no console).
+    __DEFAULT_CONSOLE_TYPE = "telnet"
+    __SUPPORTED_CONSOLE_TYPES = ("telnet", "jtag")
+    # Default baud rate for the console's JTAG serial/UART bridge when a machine config does not
+    # specify one. Separate from __DEFAULT_JTAG_BAUDRATE above (connection_type's message channel)
+    # since console_jtag_port/console_jtag_baudrate may point at a different serial device.
+    __DEFAULT_CONSOLE_JTAG_BAUDRATE = 115200
     # Default total time (seconds) JTAGMessageChannel spends retrying a reconnect after noticing
     # the JTAG serial port disconnected, when a machine config does not specify
     # 'redeploy_on_disconnect_delay'. Spread across JTAGMessageChannel.MAX_JTAG_RECONNECT_ATTEMPTS
     # attempts - see dut_message_channel.py.
     __DEFAULT_REDEPLOY_ON_DISCONNECT_DELAY = 1.0
     # Default dut_mode when a machine config does not specify one: an OS-enabled DUT driven by
-    # console (Telnet) kill+run commands. "passive" is the bare-metal counterpart: no console/
-    # shell, the app runs automatically once (re)loaded - see dut_deployment.py. Independent of
-    # connection_type above.
+    # console (Telnet or JTAG, see console_type above) kill+run commands. "passive" is the
+    # bare-metal counterpart: no console/shell, the app runs automatically once (re)loaded - see
+    # dut_deployment.py. Independent of connection_type above.
     __DEFAULT_DUT_MODE = "active"
     __SUPPORTED_DUT_MODES = ("active", "passive")
     # Default receive_port when a machine config does not specify one: 0 lets the OS pick a free
@@ -130,33 +142,60 @@ class Machine(threading.Thread):
             self.__disable_os_soft_reboot = machine_parameters["disable_os_soft_reboot"] is True
 
         # dut_mode selects how the app is (re)started: "active" (default) DUTs run an OS and are
-        # driven by Telnet console kill+run commands; "passive" (bare-metal) DUTs have no
-        # console/shell and start their app automatically once it is (re)loaded, via the
-        # configured 'redeploy_cmd' (see dut_deployment.py). This is independent of
-        # connection_type below - e.g. a passive DUT can still report status over Ethernet if it
-        # has a working network stack (see machines_cfgs/versal_bm_eth_passive.yaml).
+        # driven by console (Telnet or JTAG, see console_type below) kill+run commands; "passive"
+        # (bare-metal) DUTs have no console/shell and start their app automatically once it is
+        # (re)loaded, via the configured 'redeploy_cmd' (see dut_deployment.py). This is
+        # independent of connection_type below - e.g. a passive DUT can still report status over
+        # Ethernet if it has a working network stack (see machines_cfgs/versal_bm_eth_passive.yaml).
         self.__dut_mode = machine_parameters.get("dut_mode", self.__DEFAULT_DUT_MODE).lower()
         if self.__dut_mode not in self.__SUPPORTED_DUT_MODES:
             raise ValueError(f"Unsupported dut_mode '{self.__dut_mode}', expected one of "
                              f"{self.__SUPPORTED_DUT_MODES}")
 
-        # ip/username/password: only needed for the Telnet console login (kill+run commands, and
-        # the boot-time ping check - see __dut_login/__wait_for_booting), which only ever happens
-        # for "active" DUTs. Optional/unused for "passive" (bare-metal) DUTs.
+        # console_type selects the transport used for a dut_mode: active DUT's console (login +
+        # kill/run commands): "telnet" (default) - a network Telnet connection, requires 'ip'. Or
+        # "jtag" - the JTAG probe's serial/UART bridge (console_jtag_port below), for DUTs with no
+        # network path to a console at all. Meaningless/unvalidated for dut_mode: passive, which
+        # never opens a console regardless of this field. Independent of connection_type above,
+        # which only selects the message-listening transport (see dut_connection.py).
+        self.__console_type = machine_parameters.get("console_type", self.__DEFAULT_CONSOLE_TYPE).lower()
+        if self.__console_type not in self.__SUPPORTED_CONSOLE_TYPES:
+            raise ValueError(f"Unsupported console_type '{self.__console_type}', expected one of "
+                             f"{self.__SUPPORTED_CONSOLE_TYPES}")
+
+        # ip/username/password: only needed for the console login (kill+run commands, and the
+        # boot-time readiness check - see __dut_login/__wait_for_booting), which only ever happens
+        # for "active" DUTs. 'ip' is further only required when console_type is "telnet" - a JTAG
+        # console has no IP to dial/ping (see console_jtag_port below). Optional/unused for
+        # "passive" (bare-metal) DUTs.
         self.__dut_ip = machine_parameters.get("ip")
         self.__dut_username = machine_parameters.get("username")
         self.__dut_password = machine_parameters.get("password")
         if self.__dut_mode == "active":
-            if not self.__dut_ip:
-                raise ValueError("dut_mode 'active' requires 'ip' to be set in the machine config")
+            if self.__console_type == "telnet" and not self.__dut_ip:
+                raise ValueError("dut_mode 'active' with console_type 'telnet' requires 'ip' to be "
+                                 "set in the machine config")
             if self.__dut_username is None or self.__dut_password is None:
                 raise ValueError("dut_mode 'active' requires 'username' and 'password' to be set "
                                  "in the machine config")
         elif self.__dut_username is None:
-            # "passive" DUTs never log into a Telnet console, so username is only ever used for
+            # "passive" DUTs never log into a console, so username is only ever used for
             # informational purposes (e.g. __str__ below) - default it to hostname rather than
             # requiring it to be redundantly set in the config.
             self.__dut_username = self.__dut_hostname
+
+        # console_jtag_port / console_jtag_baudrate: the serial device exposed by a JTAG probe's
+        # UART bridge, used for the console instead of Telnet. Required when dut_mode is "active"
+        # and console_type is "jtag"; console_jtag_baudrate defaults to 115200 if omitted. Kept
+        # separate from jtag_port/jtag_baudrate below (connection_type's message channel) since the
+        # two can point at different serial devices - e.g. one UART for the console, another for
+        # status/log output.
+        self.__console_jtag_port = machine_parameters.get("console_jtag_port")
+        self.__console_jtag_baudrate = machine_parameters.get(
+            "console_jtag_baudrate", self.__DEFAULT_CONSOLE_JTAG_BAUDRATE)
+        if self.__dut_mode == "active" and self.__console_type == "jtag" and not self.__console_jtag_port:
+            raise ValueError("dut_mode 'active' with console_type 'jtag' requires "
+                             "'console_jtag_port' to be set in the machine config")
 
         # connection_type selects how the server listens for DUT status/log messages (#IT,
         # #LOGFILE, #CMD, ...): "ethernet" (default) - a UDP socket bound to
@@ -257,7 +296,10 @@ class Machine(threading.Thread):
 
     def __str__(self) -> str:
         dut_str = f"IP:{self.__dut_ip} USERNAME:{self.__dut_username} "
-        dut_str += f"HOSTNAME:{self.__dut_hostname} CONN:{self.__connection_type}"
+        dut_str += f"HOSTNAME:{self.__dut_hostname} CONSOLE:{self.__console_type}"
+        if self.__console_type == "jtag":
+            dut_str += f" CONSOLE_JTAGPORT:{self.__console_jtag_port}"
+        dut_str += f" CONN:{self.__connection_type}"
         if self.__connection_type == "ethernet":
             dut_str += f" RECPORT:{getattr(self.__message_channel, 'receive_port', self.__receiving_port)}"
         else:
@@ -360,10 +402,13 @@ class Machine(threading.Thread):
         self.__logger.info(f"CLOSE_BEAM received (not yet implemented) args='{args}' on {self}")
 
     def __new_dut_connection(self) -> DUTConnection:
-        """ Build a fresh, not-yet-logged-in Telnet console connection for this (active) DUT """
-        return create_dut_connection(ip=self.__dut_ip, username=self.__dut_username,
+        """ Build a fresh, not-yet-logged-in console connection for this (active) DUT - Telnet or
+        JTAG serial, per console_type """
+        return create_dut_connection(console_type=self.__console_type, username=self.__dut_username,
                                      password=self.__dut_password, timeout=self.__max_timeout_time,
-                                     logger_name=self.__logger_name)
+                                     logger_name=self.__logger_name, ip=self.__dut_ip,
+                                     jtag_port=self.__console_jtag_port,
+                                     jtag_baudrate=self.__console_jtag_baudrate)
 
     def __dut_login(self) -> DUTConnection:
         """ Open a new DUT console connection and perform the login handshake
@@ -488,11 +533,11 @@ class Machine(threading.Thread):
             # All loops must stop after the event is set
             if self.__stop_event.is_set():
                 break
-            # dut_mode 'active' always uses Telnet for its console (see __new_dut_connection), so
-            # a ping check is always meaningful here regardless of connection_type (which only
-            # selects the message-listening transport).
+            # A ping check only makes sense for a Telnet console (an IP to ping) - a JTAG console
+            # has none, so skip straight to the login attempt itself (see console_type above).
             try:
-                subprocess.check_output(["ping", "-c", "1", self.__dut_ip], timeout=self.__BOOT_PING_TIMEOUT)
+                if self.__console_type == "telnet":
+                    subprocess.check_output(["ping", "-c", "1", self.__dut_ip], timeout=self.__BOOT_PING_TIMEOUT)
                 # Try to see if the DUT console login is indeed possible
                 tn = self.__dut_login()
                 tn.close()

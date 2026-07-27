@@ -1,16 +1,19 @@
 # Configuration example for carolk401 device
 #
-# Two independent axes configure this DUT:
-# - dut_mode ("active"/"passive" below): how the app is (re)started - Telnet console kill/run
-#   commands, or a local redeploy_cmd script.
+# Three independent axes configure this DUT:
+# - dut_mode ("active"/"passive" below): how the app is (re)started - console kill/run commands,
+#   or a local redeploy_cmd script.
+# - console_type ("telnet"/"jtag" below): only meaningful when dut_mode is "active" - which
+#   transport the console (kill/run commands, boot-time login check) uses.
 # - connection_type ("ethernet"/"jtag" below): how the server listens for DUT status/log messages
 #   (#IT, #LOGFILE, #CMD, ...) - a UDP socket, or the JTAG probe's serial/UART bridge.
-# Any combination of the two is valid; this example is active+ethernet, the original/default mode.
+# Any combination is valid; this example is active+telnet+ethernet, the original/default mode.
 
 # the IP address of the machine
-# Required when dut_mode is "active" (the default - see below): the Telnet console dials this
-# address directly, and it is also pinged during the boot-time readiness check. Optional/unused
-# when dut_mode is "passive" (no console is ever logged into).
+# Required when dut_mode is "active" (the default - see below) and console_type is "telnet" (also
+# the default): the Telnet console dials this address directly, and it is also pinged during the
+# boot-time readiness check. Optional/unused when dut_mode is "passive" (no console is ever logged
+# into) or when console_type is "jtag" (see below - a JTAG console has no IP to dial/ping).
 ip:  192.168.195.6
 
 # Port that the device will send data
@@ -56,8 +59,8 @@ disable_os_soft_reboot: !!bool True
 # connection_type: how the server listens for DUT status/log messages (#IT, #LOGFILE, #CMD, ...).
 # Supported values: "ethernet" (default, used if omitted) - a UDP socket bound to
 # server_ip:receive_port, or "jtag" - the JTAG probe's serial/UART bridge (jtag_port/jtag_baudrate
-# below). Independent of dut_mode below: console access (when dut_mode is "active") always uses
-# Telnet regardless of this setting.
+# below). Independent of both dut_mode and console_type below - e.g. this DUT could use a JTAG
+# console (console_type: jtag) while still reporting status over this UDP socket.
 connection_type: ethernet
 
 # jtag_port / jtag_baudrate: only used when connection_type is "jtag". jtag_port is the serial
@@ -67,9 +70,25 @@ connection_type: ethernet
 # jtag_port: /dev/ttyUSB0
 # jtag_baudrate: !!int 115200
 
+# console_type: only meaningful when dut_mode is "active" below (a "passive" DUT never opens a
+# console). Supported values: "telnet" (default, used if omitted) - a network Telnet connection to
+# 'ip' above, or "jtag" - a JTAG probe's serial/UART bridge (console_jtag_port/console_jtag_baudrate
+# below), for DUTs with no network path to a console at all. Independent of connection_type above -
+# console_jtag_port and jtag_port may be the same or different serial devices.
+# console_type: jtag
+
+# console_jtag_port / console_jtag_baudrate: only used when console_type is "jtag".
+# console_jtag_port is the serial device exposed by the JTAG probe's UART bridge that the server
+# logs into (kept separate from connection_type's jtag_port above, since they may be different
+# devices), console_jtag_baudrate defaults to 115200 if omitted. 'ip' above is not needed in this
+# case, but 'username'/'password' below still are.
+# console_jtag_port: /dev/ttyUSB2
+# console_jtag_baudrate: !!int 115200
+
 # dut_mode: how the app is (re)started on this DUT.
-# - "active" (default, used if omitted): an OS-enabled DUT reachable over a Telnet console; the
-#   app is (re)started by logging in and issuing kill/run commands (from json_files below).
+# - "active" (default, used if omitted): an OS-enabled DUT reachable over a console (Telnet or
+#   JTAG, per console_type above); the app is (re)started by logging in and issuing kill/run
+#   commands (from json_files below).
 # - "passive": a bare-metal DUT (e.g. FPGA/SoC) with no OS/shell, whose app runs automatically
 #   as soon as it is (re)loaded. Instead of console commands, the app is (re)started by running
 #   'redeploy_cmd' below (soft OS reboot is automatically disabled in this mode, as there is no
