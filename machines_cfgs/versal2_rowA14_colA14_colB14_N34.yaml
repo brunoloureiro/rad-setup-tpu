@@ -1,0 +1,108 @@
+# Configuration for the Versal Bare-Metal DUT, passive mode, reporting status over a JTAG probe's
+# UART bridge.
+#
+# dut_mode is "passive": this board has no OS/shell. Its app starts running automatically as soon
+# as it is (re)loaded via 'redeploy_cmd' below (an xsct/JTAG-debugger deployment script), instead
+# of being started by logging into a console and issuing kill/run commands.
+#
+# connection_type is "jtag": this DUT is fully bare-metal with no network stack at all, so instead
+# of a UDP socket, the server reads DUT status/log messages (#IT, #LOGFILE, #CMD, ...) directly off
+# jtag_port below (the JTAG probe's serial/UART bridge) - see server/dut_message_channel.py. This is
+# a separate, independent axis from dut_mode: contrast with versal_bm_eth_passive.yaml, also
+# dut_mode "passive" but connection_type "ethernet" because that board does have a network stack.
+#
+# 'ip', 'receive_port', 'username' and 'password' are all omitted below - none of them are used
+# for a dut_mode "passive" DUT (no console login is ever performed) with connection_type "jtag"
+# (no UDP socket is ever opened). 'username' defaults to 'hostname' below when omitted (it is only
+# ever used for informational display - e.g. __str__ - for a "passive" DUT, see machine.py).
+
+# hostname the hostname of the machine, that must contains the device in the name
+hostname: versal_bm_jtag_2
+
+# power_switch_ip IP address of the power switch
+power_switch_ip: 192.168.1.120
+
+# power_switch_port outlet of the power switch
+power_switch_port: !!int 2
+
+# power_switch_model brand of the power switch
+power_switch_model: lindy
+
+# The server will wait for this time for the OS booting. Only meaningful for dut_mode "active"
+# (ignored here, dut_mode is "passive" below): passive DUTs redeploy immediately after power-on
+# instead of waiting, since redeploy_cmd already performs its own board-specific settle waits.
+# In seconds
+boot_waiting_time: !!int 60
+
+# connection timeout
+# This is the maximum time interval between the messages received
+max_timeout_time: !!int 5
+
+# Disable the option for OS soft reboot before trying to hard reboot
+# (dut_mode: passive forces this to True automatically anyway, since there is no OS to reboot)
+disable_os_soft_reboot: !!bool True
+
+# connection_type: how the server listens for DUT status/log messages (#IT, #LOGFILE, #CMD, ...).
+# Supported values: "ethernet" (default, used if omitted) - a UDP socket bound to
+# server_ip:receive_port, or "jtag" - the JTAG probe's serial/UART bridge (jtag_port/jtag_baudrate
+# below). Independent of dut_mode below.
+connection_type: jtag
+
+# jtag_port / jtag_baudrate: only used when connection_type is "jtag". jtag_port is the serial
+# device exposed by the JTAG probe's UART bridge (e.g. an FTDI-based adapter) that the server reads
+# DUT messages from (one ASCII-text message per line, matching libLogHelper's UDP wire format -
+# see dut_message_channel.py), jtag_baudrate defaults to 115200 if omitted.
+jtag_port: /dev/ttyUSB3
+# jtag_baudrate: !!int 115200
+
+# redeploy_on_disconnect_delay: only used when connection_type is "jtag". Total time (seconds)
+# JTAGMessageChannel spends retrying a reconnect after noticing the JTAG serial port disconnected
+# (e.g. the USB/FTDI adapter briefly dropping out on a board reset - see DEBUG_PROGRESS.md),
+# spread evenly across JTAGMessageChannel.MAX_JTAG_RECONNECT_ATTEMPTS (hard-coded, defaults to 5)
+# attempts. Only if the port is still unavailable after all attempts does the server escalate to
+# its regular redeploy/reboot logic. Defaults to 1.0 if omitted.
+# redeploy_on_disconnect_delay: !!float 1.0
+
+# dut_mode: how the app is (re)started on this DUT.
+# - "active" (default, used if omitted): an OS-enabled DUT reachable over a Telnet console;
+#   the app is (re)started by logging in and issuing kill/run commands.
+# - "passive": a bare-metal DUT (e.g. FPGA/SoC) with no OS/shell, whose app runs automatically
+#   as soon as it is (re)loaded. Instead of console commands, the app is (re)started by running
+#   'redeploy_cmd' below (soft OS reboot is automatically disabled in this mode, as there is no
+#   OS to reboot).
+dut_mode: passive
+
+# redeploy_cmd: required when dut_mode is "passive". Command used to (re)load and start the app,
+# e.g. a TCL script driven through a JTAG debugger (Xilinx xsct/xsdb). Either a shell-style
+# string or a YAML list (list form avoids shell quoting/injection concerns and is preferred). Run
+# immediately after the DUT is powered on (no boot_waiting_time wait first - see machine.py).
+#
+# deploy_versal_jtag.sh mirrors versal-aie-dev's `make deploy` (see that repo's Makefile,
+# 'deploy'/'_post_bsp_deploy' targets): it switches the board to JTAG boot mode and resets it
+# (debug.tcl), then loads PDI_PATH (and optionally ELF_PATH) via deploy.tcl. Both steps run on
+# every redeploy since the JTAG boot mode does not survive a power cycle. PDI_PATH/ELF_PATH are
+# set here via the 'env' utility rather than a shell, so no shell invocation/quoting is involved.
+# This requires the Vitis toolchain environment (xsdb on PATH) to already be sourced before
+# server.py is started - see /home/loureiro/source_vitis.sh.
+redeploy_cmd: [
+    "env",
+    "PDI_PATH=/home/loureiro/repos/radiation-setup-jtag/machines_cfgs/versal_files/versal_2_rowA14_colA14_colB14_N34.pdi",
+    "ELF_PATH=/home/loureiro/repos/radiation-setup-jtag/machines_cfgs/versal_files/versal_2_rowA14_colA14_colB14_N34.elf",
+    "/home/loureiro/repos/radiation-setup-jtag/machines_cfgs/deploy_versal_2_jtag.sh",
+]
+
+# redeploy_timeout: max seconds to wait for redeploy_cmd to finish. Defaults to 60 if omitted.
+# Bumped from the old single-step deploy.tcl-only value: the wrapper script now also runs
+# debug.tcl first (JTAG boot mode switch + PMC reset) plus a mandatory 5s settle before
+# deploy.tcl, and PDI programming itself can take a while.
+redeploy_timeout: !!int 90
+
+# restart_interval: seconds to wait between receiving '#ABORT'/'#END' from the DUT and
+# restarting its app. Defaults to 1.0 if omitted.
+# restart_interval: !!float 1.0
+
+# json_files: not used here - no benchmark rotation is needed, and this DUT has no console to
+# issue exec/killcmd on anyway. Since dut_mode is "passive" and json_files is omitted, test_name
+# (required) and test_header (optional) below are used instead to name DUTLogging files.
+test_name: versal_2_rowA14_colA14_colB14_N34
+test_header: Versal DUT 2 rowA14_colA14_colB14_N34
