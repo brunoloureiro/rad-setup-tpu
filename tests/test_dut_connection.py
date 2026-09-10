@@ -1,9 +1,15 @@
+import collections
+import os
+import shutil
+import tempfile
 import threading
 import time
 import unittest
 from unittest import mock
 
 from server.dut_connection import JTAGDUTConnection, TelnetDUTConnection, create_dut_connection
+
+_FakePort = collections.namedtuple("_FakePort", ["device", "serial_number"])
 
 
 class FakeSerial:
@@ -152,6 +158,52 @@ class JTAGDUTConnectionTestCase(unittest.TestCase):
                                  username="carol", password="qwerty0", timeout=1, logger_name="TEST")
         with self.assertRaises(Exception):
             conn.open()
+
+    def test_open_raises_when_jtag_id_does_not_resolve(self):
+        with mock.patch("serial.tools.list_ports.comports", return_value=[]):
+            conn = JTAGDUTConnection(jtag_id="NO_SUCH_PROBE", baudrate=115200, username="carol",
+                                     password="qwerty0", timeout=1, logger_name="TEST")
+            with self.assertRaises(Exception):
+                conn.open()
+
+    def test_open_resolves_jtag_id_to_device_path(self):
+        fake_serial = FakeSerial(port="/dev/ttyUSB4", baudrate=115200)
+        fake_ports = [_FakePort(device="/dev/ttyUSB4", serial_number="CONSOLE_PROBE")]
+        with _patch_serial_with(fake_serial), \
+                mock.patch("serial.tools.list_ports.comports", return_value=fake_ports), \
+                mock.patch("os.path.exists", return_value=True):
+            conn = JTAGDUTConnection(jtag_id="CONSOLE_PROBE", baudrate=115200, username="carol",
+                                     password="qwerty0", timeout=1, logger_name="TEST")
+            conn.open()
+            self.assertEqual("/dev/ttyUSB4", fake_serial.port)
+            conn.close()
+
+    def test_raw_bytes_are_mirrored_to_the_tee_file(self):
+        tmp_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp_dir, ignore_errors=True)
+        raw_log_path = os.path.join(tmp_dir, "console_raw.log")
+
+        fake_serial = FakeSerial(port="/dev/ttyFAKE", baudrate=115200)
+        with _patch_serial_with(fake_serial), mock.patch("os.path.exists", return_value=True):
+            conn = JTAGDUTConnection(port="/dev/ttyFAKE", baudrate=115200, username="carol",
+                                     password="qwerty0", timeout=2, logger_name="TEST",
+                                     raw_log_path=raw_log_path)
+
+            dut_thread = threading.Thread(
+                target=self._simulate_dut_login, args=(fake_serial, "carol", "qwerty0"), daemon=True)
+            dut_thread.start()
+            conn.login()
+            dut_thread.join(timeout=2)
+
+            fake_serial.dut_send(b"more output\n")
+            time.sleep(0.05)
+            conn.read_very_eager()
+            conn.close()
+
+        with open(raw_log_path, "rb") as fp:
+            mirrored = fp.read()
+        self.assertIn(b"login: ", mirrored)
+        self.assertIn(b"more output\n", mirrored)
 
 
 if __name__ == '__main__':

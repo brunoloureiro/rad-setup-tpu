@@ -16,10 +16,10 @@ server_log_store_dir: logs/
 machines: [
   # The server will check this machine
   {
-    "enabled": True, "cfg_file": "machines_cfgs/versal1_rowA14_colA14_colB14_N34.yaml"
+    "enabled": False, "cfg_file": "machines_cfgs/versal1_rowA14_colA14_colB14_N34.yaml"
   },
   # The server will not check this machine
   {
-    "enabled": False, "cfg_file": "machines_cfgs/versal2_rowA14_colA14_colB14_N34.yaml"
+    "enabled": True, "cfg_file": "machines_cfgs/versal2_rowA14_colA14_colB14_N34.yaml"
   },
 ]

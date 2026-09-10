@@ -1,14 +1,19 @@
 """
-Hermetic tests for Machine's config validation around the new console_type axis (Telnet vs JTAG
-console for dut_mode: active DUTs). Unlike test_machine.py, these never call Machine.run()/start()
-or touch real hardware - Machine.__init__ only opens the message channel (here always
-connection_type: ethernet, an in-process UDP socket on an OS-assigned ephemeral port), never the
-console itself (that only happens later, from run()/__wait_for_booting/__soft_app_reboot).
+Hermetic tests for Machine's config validation around the console_type axis (Telnet vs JTAG
+console for dut_mode: active DUTs, in MachineConsoleTypeConfigTestCase) and the connection_type
+axis's jtag_id alternative to a literal jtag_port (in MachineConnectionTypeJtagConfigTestCase).
+Unlike test_machine.py, these never call Machine.run()/start() or touch real hardware:
+MachineConsoleTypeConfigTestCase uses connection_type: ethernet (an in-process UDP socket on an
+OS-assigned ephemeral port) so Machine.__init__ never opens a console itself (that only happens
+later, from run()/__wait_for_booting/__soft_app_reboot); MachineConnectionTypeJtagConfigTestCase
+uses connection_type: jtag with a port/id that is never actually available, exercising
+JTAGMessageChannel.open()'s "must not raise, ever" contract (see dut_message_channel.py).
 """
 import os
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 import yaml
 
@@ -122,6 +127,92 @@ class MachineConsoleTypeConfigTestCase(unittest.TestCase):
             "console_type": "jtag",
         })
         self.assertIn("HOSTNAME:passive_ignores_console", str(machine))
+
+    def test_jtag_console_accepts_console_jtag_id_instead_of_port(self):
+        machine = self._build_machine("jtag_console_id", {
+            "console_type": "jtag",
+            "console_jtag_id": "PROBE_SERIAL_XYZ",
+        })
+        self.assertIn("CONSOLE:jtag", str(machine))
+        self.assertIn("CONSOLE_JTAGID:PROBE_SERIAL_XYZ", str(machine))
+        self.assertNotIn("CONSOLE_JTAGPORT", str(machine))
+
+    def test_jtag_console_without_port_or_id_raises(self):
+        with self.assertRaises(ValueError):
+            self._write_and_build_without_stop_tracking("jtag_no_port_or_id", {"console_type": "jtag"})
+
+
+class MachineConnectionTypeJtagConfigTestCase(unittest.TestCase):
+    """ Hermetic tests for the connection_type: jtag axis's config validation and its jtag_id
+    alternative to a literal jtag_port. Unlike ethernet's in-process UDP socket, opening a JTAG
+    serial channel can no longer fail Machine construction even when the port/id is not available
+    (see JTAGMessageChannel.open()) - that is exactly the behavior under test here, since a Machine
+    thread failing to construct used to take down the entire server (see server.py's main()). """
+
+    def setUp(self):
+        logging_setup(logger_name="TEST_MACHINE_CONNECTION_TYPE_JTAG",
+                     log_file="unit_test_log_MachineConnectionTypeJtag.log", enable_curses=False)
+        self.tmp_dir = tempfile.mkdtemp()
+        self.server_log_path = os.path.join(self.tmp_dir, "logs")
+        os.mkdir(self.server_log_path)
+        self._machines_to_stop = []
+
+    def tearDown(self):
+        for machine in self._machines_to_stop:
+            machine.stop()
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
+
+    def _write_cfg(self, name: str, overrides: dict) -> str:
+        base = {
+            "hostname": name,
+            "power_switch_ip": "127.0.0.1",
+            "power_switch_port": 1,
+            "power_switch_model": "lindy",
+            "boot_waiting_time": 1,
+            "max_timeout_time": 1,
+            "connection_type": "jtag",
+            "dut_mode": "passive",
+            "redeploy_cmd": ["/bin/true"],
+            "test_name": name,
+        }
+        base.update(overrides)
+        cfg_path = os.path.join(self.tmp_dir, f"{name}.yaml")
+        with open(cfg_path, "w") as fp:
+            yaml.safe_dump(base, fp)
+        return cfg_path
+
+    def _build_machine(self, name: str, overrides: dict):
+        from server.machine import Machine
+        cfg_path = self._write_cfg(name, overrides)
+        machine = Machine(configuration_file=cfg_path, server_ip="127.0.0.1",
+                          logger_name="TEST_MACHINE_CONNECTION_TYPE_JTAG",
+                          server_log_path=self.server_log_path)
+        self._machines_to_stop.append(machine)
+        return machine
+
+    def test_connection_type_jtag_without_port_or_id_raises(self):
+        with self.assertRaises(ValueError):
+            self._build_machine("jtag_conn_no_port_or_id", {})
+
+    def test_connection_type_jtag_accepts_jtag_id_instead_of_port(self):
+        machine = self._build_machine("jtag_conn_id", {"jtag_id": "PROBE_SERIAL_MSG"})
+        self.assertIn("JTAGID:PROBE_SERIAL_MSG", str(machine))
+        self.assertNotIn("JTAGPORT", str(machine))
+
+    def test_construction_does_not_raise_when_jtag_port_is_missing_at_startup(self):
+        # This is the core "server must start even if a jtag/serial port cannot be opened right
+        # away" fix - Machine.__init__ previously called MessageChannel.open() eagerly and let a
+        # missing port's exception propagate all the way out (crashing every Machine in the
+        # server, not just this one - see server.py's main()).
+        machine = self._build_machine("jtag_conn_missing_port", {
+            "jtag_port": "/dev/ttyDOES_NOT_EXIST_MACHINE_STARTUP",
+        })
+        self.assertIn("JTAGPORT:/dev/ttyDOES_NOT_EXIST_MACHINE_STARTUP", str(machine))
+
+    def test_construction_does_not_raise_when_jtag_id_is_unresolved_at_startup(self):
+        with mock.patch("serial.tools.list_ports.comports", return_value=[]):
+            machine = self._build_machine("jtag_conn_missing_id", {"jtag_id": "NOT_PLUGGED_IN_YET"})
+        self.assertIn("JTAGID:NOT_PLUGGED_IN_YET", str(machine))
 
 
 if __name__ == '__main__':

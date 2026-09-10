@@ -78,10 +78,22 @@ particular change. `test_dut_commands.py` is fully hermetic (pure dispatcher log
 write/read_very_eager/close) against a simulated DUT, using a `FakeSerial` in-memory duplex
 substitute (monkeypatched over `serial.Serial`) driven by a background thread that plays the DUT
 side of a login handshake — no real JTAG hardware, pty, or OS tty involved.
-`test_machine_config.py` is likewise hermetic: it builds `Machine` instances (never `.run()`/
-`.start()`'d) from temp YAML configs to check `console_type`/`console_jtag_port` validation, using
-`connection_type: ethernet` (an in-process UDP socket) so no serial device is ever opened by
-`Machine.__init__` itself. Don't expect the hardware-dependent tests to pass in a sandboxed/CI
+`test_machine_config.py` is likewise hermetic: `MachineConsoleTypeConfigTestCase` builds `Machine`
+instances (never `.run()`/`.start()`'d) from temp YAML configs to check `console_type`/
+`console_jtag_port`/`console_jtag_id` validation, using `connection_type: ethernet` (an in-process
+UDP socket) so no serial device is ever opened by `Machine.__init__` itself;
+`MachineConnectionTypeJtagConfigTestCase` instead uses `connection_type: jtag` with a port/id that
+is never actually available, to exercise `JTAGMessageChannel.open()`'s "must never raise" contract
+end-to-end through `Machine.__init__` (see "DUT message channel" above) - both classes are fully
+hermetic since neither ever needs the port/id to actually resolve to real hardware.
+`test_jtag_port.py` is hermetic unit coverage for `find_serial_port_by_id()` (exact/prefix
+matching, no-match, multiple-match tie-breaking), driven entirely by a mocked
+`serial.tools.list_ports.comports()`. `test_dut_message_channel.py` is hermetic coverage for
+`JTAGMessageChannel` beyond what the config-validation tests above check: the raw-serial-mirror
+file (`serial_tee.py`), `jtag_id` resolution (including re-resolving to a new device path across a
+reconnect), and the "receive() must self-heal once a previously-missing port appears" behavior -
+all driven by a `FakeSerial` in-memory substitute, the same pattern `test_dut_connection.py` uses
+for `JTAGDUTConnection`. Don't expect the hardware-dependent tests to pass in a sandboxed/CI
 environment without the physical rig; when changing shared logic, reason about correctness
 directly rather than trusting a green run.
 
@@ -152,6 +164,17 @@ transport, see below) — adding a third console transport (e.g. SSH) means impl
 `JTAGDUTConnection.open()` follows the same up-front-validation pattern as `JTAGMessageChannel.open()`
 below: it checks `os.path.exists(console_jtag_port)` before ever touching `pyserial`, so a
 wrong/unplugged port produces one clear log line instead of a bare stack trace or a silent hang.
+Unlike `JTAGMessageChannel.open()`, this one **does** raise when the port is unavailable - it is
+only ever called from within `Machine`'s own retry loops (`__wait_for_booting`/`__soft_app_reboot`),
+which already tolerate the `OSError` it raises (`serial.SerialException` is an `OSError` subclass)
+and simply try again later, so there is no separate "must not crash the server" concern here.
+
+`console_jtag_port` can be a literal device path, or replaced with `console_jtag_id` - the JTAG
+probe's own USB serial number (see "DUT message channel"'s `jtag_id` below for the full rationale
+and `server/jtag_port.py`); if both are set, `console_jtag_id` takes precedence. Since a fresh
+`JTAGDUTConnection` is built per login attempt (`Machine.__new_dut_connection`), resolution happens
+naturally on every attempt with no caching to invalidate. Every raw byte read off the console port
+is also mirrored to a plain file via `server/serial_tee.py` (`console_jtag_raw_log`, see below).
 
 ### DUT message channel (`server/dut_message_channel.py`)
 
@@ -189,6 +212,48 @@ soft OS reboot -> hard power cycle) exactly like an unresponsive DUT would — f
 active-mode Telnet-unreachable case. If reconnection does succeed (either during this retry loop
 or on a later `receive()` call, since a still-`None` `__serial` is retried every call), it
 self-heals without ever needing to escalate.
+
+`jtag_port` can be a literal device path (e.g. `/dev/ttyUSB2`), or replaced with `jtag_id` - the
+JTAG probe's own USB serial number, resolved to a device path automatically via
+`server/jtag_port.py`'s `find_serial_port_by_id()` (built on `serial.tools.list_ports.comports()`,
+so it works for anything pyserial can enumerate, not just Linux `/dev/ttyUSB<n>` nodes). This is
+the same identifier already used to pin a physical board in
+`machines_cfgs/versal_scripts/board_select.tcl` (`jtag_cable_serial`/`BOARD_SERIAL`) - the JTAG
+probes here expose that same value as their USB device serial number, since the UART bridge and
+the JTAG interface live on the same physical USB device. Resolution is redone fresh on every
+(re)open attempt (`__attempt_reopen`), not cached, since a probe can re-enumerate to a different
+device path between attempts; if both `jtag_port` and `jtag_id` are set, `jtag_id` takes
+precedence (matching `board_select.tcl`'s own `BOARD_SERIAL`-over-`BOARD` precedence). If a
+`jtag_id` never resolves to any currently-enumerated port, that is logged and treated exactly like
+a missing literal `jtag_port` (see below).
+
+**`JTAGMessageChannel.open()` never raises**, unlike `JTAGDUTConnection.open()` above: a JTAG
+probe/UART adapter not being plugged in *yet* when the server starts must not prevent the whole
+server (every `Machine` thread, including unrelated DUTs) from starting, since this method is
+called eagerly and unguarded from `Machine.__init__` (unlike the console connection, which is only
+ever opened later from within `run()`'s own retry loops). Internally, `open()` just delegates to
+the same `__attempt_reopen()` used for reconnects; if the port/id cannot be resolved or opened, it
+logs a clear, de-duplicated error and leaves the channel with no open serial handle, and the very
+first `receive()` call transparently retries via `__reconnect_with_retries()` exactly as it would
+for a later mid-run disconnect - there is no separate "not opened yet" code path to reason about.
+
+Every raw byte read off the port (successful reads only, not applied to what would otherwise be
+lost during a disconnect) is also mirrored to a plain file via `server/serial_tee.py`'s
+`SerialTee`, configured per-DUT via `jtag_raw_log` (defaults to
+`<dirname of server_log_store_dir>/jtag_logs/<hostname>/jtag_raw.log`; set to `null`/`""` to
+disable). This exists because a serial device only has one reader at a time - the OS hands each
+chunk of incoming bytes to whichever process's `read()` call happens to be pending, so a human
+`tail -f`/`cat`/`minicom` session opened directly on the same port for a manual look at the
+traffic would corrupt both that view and this server's; watching the mirror file instead never
+contends for the port. The default `jtag_logs/` directory is a **sibling** of
+`server_log_store_dir` (`logs/` by default), not nested inside it: `logs/<hostname>/` is
+`DUTLogging`'s per-benchmark-run application/test log directory, and raw JTAG serial traffic is a
+different, continuously-appended kind of log that has nothing to do with benchmark runs - keeping
+it out of `logs/<hostname>/` means that directory stays purely about the DUT's application/test
+output, while `jtag_logs/<hostname>/` mirrors the same per-hostname structure for JTAG-specific
+logs instead. `Machine.__init__` computes this sibling base once as `__jtag_logs_dir`. The
+console's `JTAGDUTConnection` mirrors its own raw traffic the same way, via `console_jtag_raw_log`
+(default `<dirname of server_log_store_dir>/jtag_logs/<hostname>/jtag_console.log`).
 
 ### DUT-requested commands (`server/dut_commands.py`)
 
@@ -262,10 +327,12 @@ keep new switch backends behind that lock too.
     needs `username`/`password` and `json_files` (benchmarks); `passive` needs `redeploy_cmd` (and
     optionally `redeploy_timeout`, `test_name`/`test_header` in place of `json_files`).
   - For `dut_mode: active` only, `console_type: telnet` (default) or `jtag` further selects what
-    the console needs: `telnet` needs `ip`; `jtag` needs `console_jtag_port` (and optionally
-    `console_jtag_baudrate`) instead. Ignored entirely for `dut_mode: passive`.
+    the console needs: `telnet` needs `ip`; `jtag` needs `console_jtag_port` or `console_jtag_id`
+    (and optionally `console_jtag_baudrate`, `console_jtag_raw_log`) instead - see "DUT console
+    connection" above for the `_port` vs `_id` distinction. Ignored entirely for `dut_mode: passive`.
   - `connection_type: ethernet` (default) or `jtag`, plus whichever fields that transport needs:
-    `ethernet` needs `receive_port`; `jtag` needs `jtag_port` (and optionally `jtag_baudrate`).
+    `ethernet` needs `receive_port`; `jtag` needs `jtag_port` or `jtag_id` (and optionally
+    `jtag_baudrate`, `jtag_raw_log`) - see "DUT message channel" above.
   - Plus power switch details (`power_switch_ip`/`power_switch_port`/`power_switch_model`) and
     timing knobs (`boot_waiting_time`, `max_timeout_time`, `disable_os_soft_reboot`,
     `restart_interval`) common to every DUT. Same schema for every DUT regardless of which

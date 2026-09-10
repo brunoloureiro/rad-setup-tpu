@@ -132,6 +132,15 @@ class Machine(threading.Thread):
         with open(configuration_file, 'r') as fp:
             machine_parameters = yaml.load(fp, Loader=yaml.SafeLoader)
         self.__dut_hostname = machine_parameters["hostname"]
+        # Base directory for this DUT's raw JTAG serial mirror files (see server/serial_tee.py) -
+        # a sibling of server_log_path ('logs/' by default), NOT nested inside it: server_log_path
+        # holds DUTLogging's per-benchmark-run application/test logs (see
+        # __dut_log_path/DUTLogging below), and raw JTAG traffic is a different, continuously
+        # -appended kind of log with nothing to do with benchmark runs - keeping it out of
+        # logs/<hostname>/ means that directory stays purely about the DUT's application/test
+        # output. Used by __jtag_raw_log_path/__console_jtag_raw_log_path below.
+        self.__jtag_logs_dir = os.path.join(
+            os.path.dirname(os.path.normpath(server_log_path)), "jtag_logs", self.__dut_hostname)
         self.__switch_ip = machine_parameters["power_switch_ip"]
         self.__switch_port = machine_parameters["power_switch_port"]
         self.__switch_model = machine_parameters["power_switch_model"]
@@ -184,18 +193,35 @@ class Machine(threading.Thread):
             # requiring it to be redundantly set in the config.
             self.__dut_username = self.__dut_hostname
 
-        # console_jtag_port / console_jtag_baudrate: the serial device exposed by a JTAG probe's
-        # UART bridge, used for the console instead of Telnet. Required when dut_mode is "active"
-        # and console_type is "jtag"; console_jtag_baudrate defaults to 115200 if omitted. Kept
-        # separate from jtag_port/jtag_baudrate below (connection_type's message channel) since the
-        # two can point at different serial devices - e.g. one UART for the console, another for
-        # status/log output.
+        # console_jtag_port / console_jtag_id / console_jtag_baudrate: the serial device exposed by
+        # a JTAG probe's UART bridge, used for the console instead of Telnet. Required when
+        # dut_mode is "active" and console_type is "jtag"; console_jtag_baudrate defaults to 115200
+        # if omitted. Kept separate from jtag_port/jtag_id/jtag_baudrate below (connection_type's
+        # message channel) since the two can point at different serial devices - e.g. one UART for
+        # the console, another for status/log output.
+        #
+        # console_jtag_port is a literal device path (e.g. '/dev/ttyUSB2'), which is not stable
+        # across reboots/re-enumerations. console_jtag_id is a stable alternative: the JTAG probe's
+        # own USB serial number (the same value as 'jtag_cable_serial'/BOARD_SERIAL in
+        # machines_cfgs/versal_scripts/board_select.tcl), which the server resolves to whatever
+        # device path it currently is every time it (re)opens the console (see
+        # server/jtag_port.py). If both are set, console_jtag_id takes precedence - matching
+        # board_select.tcl's own BOARD_SERIAL-over-BOARD precedence.
         self.__console_jtag_port = machine_parameters.get("console_jtag_port")
+        self.__console_jtag_id = machine_parameters.get("console_jtag_id")
         self.__console_jtag_baudrate = machine_parameters.get(
             "console_jtag_baudrate", self.__DEFAULT_CONSOLE_JTAG_BAUDRATE)
-        if self.__dut_mode == "active" and self.__console_type == "jtag" and not self.__console_jtag_port:
+        if self.__dut_mode == "active" and self.__console_type == "jtag" \
+                and not self.__console_jtag_port and not self.__console_jtag_id:
             raise ValueError("dut_mode 'active' with console_type 'jtag' requires "
-                             "'console_jtag_port' to be set in the machine config")
+                             "'console_jtag_port' or 'console_jtag_id' to be set in the machine config")
+        # console_jtag_raw_log: path to mirror every raw byte read off the console JTAG serial port
+        # to (see server/serial_tee.py - this exists because only one process can reliably read a
+        # given serial device at a time). Defaults to a file under __jtag_logs_dir above (a
+        # jtag_logs/<hostname>/ sibling of server_log_path, kept separate from DUTLogging's
+        # application/test logs); explicitly set to null/"" in the config to disable.
+        self.__console_jtag_raw_log_path = machine_parameters.get(
+            "console_jtag_raw_log", os.path.join(self.__jtag_logs_dir, "jtag_console.log"))
 
         # connection_type selects how the server listens for DUT status/log messages (#IT,
         # #LOGFILE, #CMD, ...): "ethernet" (default) - a UDP socket bound to
@@ -216,13 +242,25 @@ class Machine(threading.Thread):
         if self.__receiving_port is None:
             self.__receiving_port = self.__DEFAULT_RECEIVE_PORT
 
-        # jtag_port/jtag_baudrate: the serial device exposed by the JTAG probe's UART bridge, read
-        # for DUT messages instead of a UDP socket. Required when connection_type is "jtag";
-        # jtag_baudrate defaults to 115200 if omitted. Unused when connection_type is "ethernet".
+        # jtag_port/jtag_id/jtag_baudrate: the serial device exposed by the JTAG probe's UART
+        # bridge, read for DUT messages instead of a UDP socket. Required when connection_type is
+        # "jtag"; jtag_baudrate defaults to 115200 if omitted. Unused when connection_type is
+        # "ethernet". jtag_id is the stable-across-reboots alternative to a literal jtag_port
+        # device path - see the console_jtag_id comment above for the full rationale (same
+        # mechanism, applied to the message channel instead of the console). If both are set,
+        # jtag_id takes precedence.
         self.__jtag_port = machine_parameters.get("jtag_port")
+        self.__jtag_id = machine_parameters.get("jtag_id")
         self.__jtag_baudrate = machine_parameters.get("jtag_baudrate", self.__DEFAULT_JTAG_BAUDRATE)
-        if self.__connection_type == "jtag" and not self.__jtag_port:
-            raise ValueError("connection_type 'jtag' requires 'jtag_port' to be set in the machine config")
+        if self.__connection_type == "jtag" and not self.__jtag_port and not self.__jtag_id:
+            raise ValueError("connection_type 'jtag' requires 'jtag_port' or 'jtag_id' to be set "
+                             "in the machine config")
+        # jtag_raw_log: path to mirror every raw byte read off the message-channel JTAG serial port
+        # to (see server/serial_tee.py). Defaults to a file under __jtag_logs_dir above (see the
+        # console_jtag_raw_log comment above for the full rationale); explicitly set to null/"" in
+        # the config to disable.
+        self.__jtag_raw_log_path = machine_parameters.get(
+            "jtag_raw_log", os.path.join(self.__jtag_logs_dir, "jtag_raw.log"))
 
         # redeploy_on_disconnect_delay: only meaningful for connection_type "jtag" - total time
         # (seconds) JTAGMessageChannel spends retrying a reconnect after noticing the JTAG serial
@@ -282,9 +320,14 @@ class Machine(threading.Thread):
         self.__message_channel: MessageChannel = create_message_channel(
             connection_type=self.__connection_type, timeout=self.__max_timeout_time,
             logger_name=self.__logger_name, server_ip=server_ip, receive_port=self.__receiving_port,
-            jtag_port=self.__jtag_port, jtag_baudrate=self.__jtag_baudrate,
+            jtag_port=self.__jtag_port, jtag_id=self.__jtag_id, jtag_baudrate=self.__jtag_baudrate,
             redeploy_on_disconnect_delay=self.__redeploy_on_disconnect_delay,
-            stop_event=self.__stop_event)
+            stop_event=self.__stop_event, raw_log_path=self.__jtag_raw_log_path)
+        # For connection_type "jtag", open() deliberately does not raise if the port/id is not
+        # available yet (see JTAGMessageChannel.open()) - a probe not being plugged in *yet* when
+        # the server starts must not prevent this (or any other) Machine thread from starting at
+        # all; it keeps retrying transparently once run() starts calling receive(). For "ethernet"
+        # this still raises on a real bind failure, same as before.
         self.__message_channel.open()
 
         # Variables to control rebooting (soft app and soft OS) process
@@ -298,10 +341,15 @@ class Machine(threading.Thread):
         dut_str = f"IP:{self.__dut_ip} USERNAME:{self.__dut_username} "
         dut_str += f"HOSTNAME:{self.__dut_hostname} CONSOLE:{self.__console_type}"
         if self.__console_type == "jtag":
-            dut_str += f" CONSOLE_JTAGPORT:{self.__console_jtag_port}"
+            if self.__console_jtag_id:
+                dut_str += f" CONSOLE_JTAGID:{self.__console_jtag_id}"
+            else:
+                dut_str += f" CONSOLE_JTAGPORT:{self.__console_jtag_port}"
         dut_str += f" CONN:{self.__connection_type}"
         if self.__connection_type == "ethernet":
             dut_str += f" RECPORT:{getattr(self.__message_channel, 'receive_port', self.__receiving_port)}"
+        elif self.__jtag_id:
+            dut_str += f" JTAGID:{self.__jtag_id}"
         else:
             dut_str += f" JTAGPORT:{self.__jtag_port}"
         return dut_str
@@ -407,8 +455,9 @@ class Machine(threading.Thread):
         return create_dut_connection(console_type=self.__console_type, username=self.__dut_username,
                                      password=self.__dut_password, timeout=self.__max_timeout_time,
                                      logger_name=self.__logger_name, ip=self.__dut_ip,
-                                     jtag_port=self.__console_jtag_port,
-                                     jtag_baudrate=self.__console_jtag_baudrate)
+                                     jtag_port=self.__console_jtag_port, jtag_id=self.__console_jtag_id,
+                                     jtag_baudrate=self.__console_jtag_baudrate,
+                                     raw_log_path=self.__console_jtag_raw_log_path)
 
     def __dut_login(self) -> DUTConnection:
         """ Open a new DUT console connection and perform the login handshake

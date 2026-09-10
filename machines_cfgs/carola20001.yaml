@@ -63,12 +63,29 @@ disable_os_soft_reboot: !!bool True
 # console (console_type: jtag) while still reporting status over this UDP socket.
 connection_type: ethernet
 
-# jtag_port / jtag_baudrate: only used when connection_type is "jtag". jtag_port is the serial
-# device exposed by the JTAG probe's UART bridge (e.g. an FTDI-based adapter) that the server reads
-# DUT messages from, jtag_baudrate defaults to 115200 if omitted.
+# jtag_port / jtag_id / jtag_baudrate: only used when connection_type is "jtag". jtag_port is the
+# literal serial device exposed by the JTAG probe's UART bridge (e.g. an FTDI-based adapter) that
+# the server reads DUT messages from; jtag_baudrate defaults to 115200 if omitted.
+#
+# jtag_port is not stable across reboots/re-enumerations (a probe unplugged/replugged, or two
+# probes enumerated in a different order, can move to a different /dev/ttyUSB<n>). jtag_id is a
+# stable alternative: the JTAG probe's own USB serial number (the same value as
+# 'jtag_cable_serial'/BOARD_SERIAL in machines_cfgs/versal_scripts/board_select.tcl), which the
+# server resolves to whatever device path it currently is every time it (re)opens the port (see
+# server/jtag_port.py). If both are set, jtag_id takes precedence.
 # connection_type: jtag
 # jtag_port: /dev/ttyUSB0
+# jtag_id: 25163300A1A7A
 # jtag_baudrate: !!int 115200
+
+# jtag_raw_log: mirrors every raw byte read off the connection_type "jtag" serial port to this
+# file (see server/serial_tee.py) - useful because only one process can reliably read a given
+# serial device at a time, so a human `tail -f`-ing the raw traffic directly off /dev/ttyUSB<n>
+# alongside this server would corrupt both views. Defaults to a file under a 'jtag_logs/<hostname>/'
+# directory that is a SIBLING of server_log_store_dir (e.g. if server_log_store_dir is 'logs/',
+# this defaults under './jtag_logs/'), deliberately NOT nested inside logs/<hostname>/ alongside
+# DUTLogging's application/test-run logs; set to null/"" to disable.
+# jtag_raw_log: /home/user/jtag_logs/caroldummy/jtag_raw.log
 
 # console_type: only meaningful when dut_mode is "active" below (a "passive" DUT never opens a
 # console). Supported values: "telnet" (default, used if omitted) - a network Telnet connection to
@@ -77,13 +94,21 @@ connection_type: ethernet
 # console_jtag_port and jtag_port may be the same or different serial devices.
 # console_type: jtag
 
-# console_jtag_port / console_jtag_baudrate: only used when console_type is "jtag".
-# console_jtag_port is the serial device exposed by the JTAG probe's UART bridge that the server
-# logs into (kept separate from connection_type's jtag_port above, since they may be different
-# devices), console_jtag_baudrate defaults to 115200 if omitted. 'ip' above is not needed in this
-# case, but 'username'/'password' below still are.
+# console_jtag_port / console_jtag_id / console_jtag_baudrate: only used when console_type is
+# "jtag". console_jtag_port is the literal serial device exposed by the JTAG probe's UART bridge
+# that the server logs into (kept separate from connection_type's jtag_port above, since they may
+# be different devices); console_jtag_baudrate defaults to 115200 if omitted. 'ip' above is not
+# needed in this case, but 'username'/'password' below still are. console_jtag_id is the same
+# stable-across-reboots alternative to a literal port described for jtag_id above, applied to the
+# console instead of the message channel; if both are set, console_jtag_id takes precedence.
 # console_jtag_port: /dev/ttyUSB2
+# console_jtag_id: 25163300A1A7A
 # console_jtag_baudrate: !!int 115200
+
+# console_jtag_raw_log: same idea as jtag_raw_log above, but for the console_type "jtag" serial
+# port. Defaults under the same 'jtag_logs/<hostname>/' sibling directory as jtag_raw_log above
+# (different filename: jtag_console.log); set to null/"" to disable.
+# console_jtag_raw_log: /home/user/jtag_logs/caroldummy/jtag_console.log
 
 # dut_mode: how the app is (re)started on this DUT.
 # - "active" (default, used if omitted): an OS-enabled DUT reachable over a console (Telnet or

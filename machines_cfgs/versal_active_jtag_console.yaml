@@ -53,8 +53,17 @@ console_type: jtag
 # console_jtag_port / console_jtag_baudrate: the serial device exposed by the JTAG probe's UART
 # bridge that the server logs into. Kept separate from connection_type's jtag_port (unused here,
 # since connection_type is "ethernet" below) since the two can be different serial devices.
+#
+# console_jtag_port is a literal device path, which is not stable across reboots/re-enumerations.
+# Use 'console_jtag_id' instead (the JTAG probe's own USB serial number, resolved to a device path
+# automatically - see server/jtag_port.py and machines_cfgs/carola20001.yaml for the full
+# writeup) if this board's probe tends to move between /dev/ttyUSB<n> nodes, e.g.:
+#   console_jtag_id: 25163300A1A7A
 console_jtag_port: /dev/ttyUSB2
 # console_jtag_baudrate: !!int 115200   # optional, defaults to 115200
+# console_jtag_raw_log: mirrors raw console bytes to a plain file - see server/serial_tee.py and
+# machines_cfgs/carola20001.yaml. Defaults under 'jtag_logs/<hostname>/', a sibling of
+# server_log_store_dir (NOT nested inside it).
 
 # connection_type: "ethernet" - this board's network stack works fine, only its console doesn't
 # have a reachable path. See machines_cfgs/versal_bm_jtag_passive.yaml for a board where messages

@@ -14,7 +14,10 @@ board's own network stack carries status messages.
 Two transports are provided:
 - TelnetDUTConnection: a network Telnet connection.
 - JTAGDUTConnection: a serial console reached through a JTAG probe's UART bridge (e.g. an
-  FTDI-based adapter exposing a virtual COM port for the target's console), using pyserial.
+  FTDI-based adapter exposing a virtual COM port for the target's console), using pyserial. Its
+  device path can be given literally (console_jtag_port) or resolved automatically from a stable
+  console_jtag_id (see jtag_port.py). Every raw byte read off the port is also mirrored to a plain
+  file via serial_tee.SerialTee (see that module for why).
 
 The login handshake (wait for a login/password prompt, authenticate, wait for a shell prompt) is
 identical across transports, so it lives once in DUTConnection.login() built on top of four raw
@@ -27,6 +30,9 @@ import logging
 import os
 import time
 import typing
+
+from .jtag_port import find_serial_port_by_id
+from .serial_tee import SerialTee
 
 
 class DUTConnection(abc.ABC):
@@ -123,36 +129,61 @@ class TelnetDUTConnection(DUTConnection):
 class JTAGDUTConnection(DUTConnection):
     """ Console connection reached through a JTAG probe's UART bridge, using pyserial """
 
-    def __init__(self, port: str, baudrate: int, username: str, password: str, timeout: float, logger_name: str):
+    def __init__(self, baudrate: int, username: str, password: str, timeout: float, logger_name: str,
+                port: typing.Optional[str] = None, jtag_id: typing.Optional[str] = None,
+                raw_log_path: typing.Optional[str] = None):
         super().__init__(username=username, password=password, timeout=timeout, logger_name=logger_name)
-        self.__port = port
+        self.__configured_port = port
+        self.__jtag_id = jtag_id
         self.__baudrate = baudrate
         self.__serial = None
         # Bytes already read from the port that have not been consumed by read_until/read_very_eager yet
         self.__buffer = b""
+        # Mirrors every raw byte read off the port to a plain file - see serial_tee.py. A no-op
+        # when raw_log_path is None/"".
+        self.__tee = SerialTee(raw_log_path, self._logger)
+
+    def __resolve_port(self) -> typing.Optional[str]:
+        """ Resolved fresh on every open() call (this object is single-use - a new one is built
+        per login attempt by Machine.__new_dut_connection - so there is no cross-attempt caching
+        concern here, but a jtag_id can still legitimately resolve to a different device path than
+        a previous, separate connection attempt if the probe was re-enumerated meanwhile). """
+        if self.__jtag_id:
+            return find_serial_port_by_id(self.__jtag_id, self._logger)
+        return self.__configured_port
 
     def open(self) -> None:
         import serial
-        self._logger.info(f"Opening JTAG serial console on port={self.__port} baudrate={self.__baudrate}")
 
-        # Check up front so a wrong/unplugged console_jtag_port produces one unmistakable log line
-        # instead of a bare, easy-to-miss stack trace deep inside pyserial (same pattern as
-        # JTAGMessageChannel.open() in dut_message_channel.py).
-        if not os.path.exists(self.__port):
+        port = self.__resolve_port()
+        label = port if port else f"JTAG id '{self.__jtag_id}'"
+        self._logger.info(f"Opening JTAG serial console on {label} baudrate={self.__baudrate}")
+
+        # Check up front so a wrong/unplugged console_jtag_port/console_jtag_id produces one
+        # unmistakable log line instead of a bare, easy-to-miss stack trace deep inside pyserial
+        # (same pattern as JTAGMessageChannel.open() in dut_message_channel.py). Unlike that
+        # message-channel counterpart, this DOES raise on a missing port: this connection is only
+        # ever built and opened from within Machine's own retry loops (__wait_for_booting /
+        # __soft_app_reboot), which already tolerate the OSError this raises (serial.SerialException
+        # is an OSError subclass) and simply try again later - so there is no separate "must not
+        # crash the server" concern to design around here, unlike the eagerly-opened message channel.
+        if port is None or not os.path.exists(port):
             self._logger.error(
-                f"JTAG console serial port {self.__port} does not exist. Check that the JTAG "
-                f"probe/UART adapter is plugged in, that 'console_jtag_port' in the machine config "
-                f"matches the actual device (see 'ls /dev/ttyUSB*' or 'ls /dev/ttyACM*' on the "
-                f"server host), and that the server has permission to access it (e.g. dialout group).")
-            raise serial.SerialException(f"JTAG console serial port {self.__port} not found")
+                f"JTAG console serial {label} does not exist. Check that the JTAG probe/UART "
+                f"adapter is plugged in, that 'console_jtag_port'/'console_jtag_id' in the machine "
+                f"config matches the actual device (see 'ls /dev/ttyUSB*' or 'ls /dev/ttyACM*' on "
+                f"the server host), and that the server has permission to access it (e.g. dialout "
+                f"group).")
+            raise serial.SerialException(f"JTAG console serial {label} not found")
 
         try:
-            self.__serial = serial.Serial(port=self.__port, baudrate=self.__baudrate, timeout=self._timeout)
+            self.__serial = serial.Serial(port=port, baudrate=self.__baudrate, timeout=self._timeout)
         except serial.SerialException as e:
-            self._logger.error(f"Failed to open JTAG console serial port {self.__port}: {e}")
+            self._logger.error(f"Failed to open JTAG console serial port {port}: {e}")
             raise
         self.__buffer = b""
-        self._logger.debug(f"JTAG console serial connection opened on {self.__port}")
+        self.__tee.open()
+        self._logger.debug(f"JTAG console serial connection opened on {port}")
 
     def write(self, data: bytes) -> None:
         self.__serial.write(data)
@@ -162,6 +193,7 @@ class JTAGDUTConnection(DUTConnection):
         while expected not in self.__buffer and time.time() < deadline:
             waiting = self.__serial.in_waiting
             chunk = self.__serial.read(waiting if waiting else 1)
+            self.__tee.write(chunk)
             self.__buffer += chunk
 
         if expected not in self.__buffer:
@@ -173,19 +205,23 @@ class JTAGDUTConnection(DUTConnection):
 
     def read_very_eager(self) -> bytes:
         waiting = self.__serial.in_waiting
-        result, self.__buffer = self.__buffer + self.__serial.read(waiting), b""
+        chunk = self.__serial.read(waiting)
+        self.__tee.write(chunk)
+        result, self.__buffer = self.__buffer + chunk, b""
         return result
 
     def close(self) -> None:
         if self.__serial is not None:
             self.__serial.close()
+        self.__tee.close()
 
 
 def create_dut_connection(console_type: str, username: str, password: str, timeout: float, logger_name: str,
                           **transport_kwargs) -> DUTConnection:
     """ Build a fresh (not-yet-opened) DUTConnection for an active DUT's console
     :param console_type: "telnet" or "jtag"
-    :param transport_kwargs: for "telnet": ip. For "jtag": jtag_port, jtag_baudrate.
+    :param transport_kwargs: for "telnet": ip. For "jtag": jtag_port and/or jtag_id, jtag_baudrate,
+        and optionally raw_log_path.
     :raises ValueError: if console_type is not supported
     """
     console_type = console_type.lower()
@@ -193,6 +229,8 @@ def create_dut_connection(console_type: str, username: str, password: str, timeo
         return TelnetDUTConnection(ip=transport_kwargs["ip"], username=username, password=password,
                                    timeout=timeout, logger_name=logger_name)
     if console_type == "jtag":
-        return JTAGDUTConnection(port=transport_kwargs["jtag_port"], baudrate=transport_kwargs["jtag_baudrate"],
-                                 username=username, password=password, timeout=timeout, logger_name=logger_name)
+        return JTAGDUTConnection(port=transport_kwargs.get("jtag_port"), jtag_id=transport_kwargs.get("jtag_id"),
+                                 baudrate=transport_kwargs["jtag_baudrate"], username=username, password=password,
+                                 timeout=timeout, logger_name=logger_name,
+                                 raw_log_path=transport_kwargs.get("raw_log_path"))
     raise ValueError(f"Unsupported console_type '{console_type}', expected 'telnet' or 'jtag'")

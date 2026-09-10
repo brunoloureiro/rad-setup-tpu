@@ -39,7 +39,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VERSAL_SCRIPTS_DIR="$SCRIPT_DIR/versal_scripts"
 HW_SERVER="${HW_SERVER:-localhost:3121}"
-export BOARD=2
+export BOARD_SERIAL=25163300A1B2A
 
 : "${PDI_PATH:?PDI_PATH must be set in the environment}"
 
@@ -56,7 +56,7 @@ if [ -n "${ELF_PATH:-}" ] && [ ! -f "$ELF_PATH" ]; then
     exit 1
 fi
 
-for tcl_script in "$VERSAL_SCRIPTS_DIR/debug.tcl" "$VERSAL_SCRIPTS_DIR/deploy.tcl"; do
+for tcl_script in "$VERSAL_SCRIPTS_DIR/deploy.tcl"; do
     if [ ! -f "$tcl_script" ]; then
         echo "ERROR: expected TCL script not found: $tcl_script (has 'versal_scripts' been pulled? see pull_versal_scripts.sh)" >&2
         exit 1
@@ -75,15 +75,14 @@ if ! timeout 3 bash -c "echo > /dev/tcp/${hw_server_host}/${hw_server_port}" 2>/
     exit 1
 fi
 echo ">>> hw_server reachable at ${HW_SERVER}"
-echo ">>> BOARD=${BOARD}"
+echo ">>> BOARD_JTAG=25163300A1B2A"
 echo ">>> PDI_PATH=${PDI_PATH}"
 echo ">>> ELF_PATH=${ELF_PATH:-<unset, ELF assumed embedded in PDI>}"
+
 
 echo ">>> [1/2] Switching board to JTAG boot mode (debug.tcl)"
 TERM=vt100 xsdb -eval "connect -url TCP:${HW_SERVER}; source ${VERSAL_SCRIPTS_DIR}/debug.tcl"
 echo ">>> [1/2] Boot mode switch done"
-
-sleep 5
 
 echo ">>> [2/2] Loading PDI/ELF (deploy.tcl)"
 TERM=vt100 xsdb -eval "connect -url TCP:${HW_SERVER}; source ${VERSAL_SCRIPTS_DIR}/deploy.tcl"

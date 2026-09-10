@@ -52,7 +52,15 @@ connection_type: jtag
 # device exposed by the JTAG probe's UART bridge (e.g. an FTDI-based adapter) that the server reads
 # DUT messages from (one ASCII-text message per line, matching libLogHelper's UDP wire format -
 # see dut_message_channel.py), jtag_baudrate defaults to 115200 if omitted.
-jtag_port: /dev/ttyUSB3
+#
+# jtag_port has had to be hand-edited every time this board's probe re-enumerated to a different
+# /dev/ttyUSB<n> (see this file's git history / deploy_versal_2_jtag.sh's BOARD_SERIAL). Switch to
+# 'jtag_id' below instead once confirmed that this probe reports the same value as its USB serial
+# number (e.g. 'udevadm info -a -n /dev/ttyUSB1 | grep ATTRS{serial}', or pyserial's
+# serial.tools.list_ports - should match deploy_versal_2_jtag.sh's BOARD_SERIAL for this board) -
+# see server/jtag_port.py for how it's resolved.
+# jtag_id: 25163300A1B2A
+jtag_port: /dev/ttyUSB1
 # jtag_baudrate: !!int 115200
 
 # redeploy_on_disconnect_delay: only used when connection_type is "jtag". Total time (seconds)
@@ -84,6 +92,17 @@ dut_mode: passive
 # set here via the 'env' utility rather than a shell, so no shell invocation/quoting is involved.
 # This requires the Vitis toolchain environment (xsdb on PATH) to already be sourced before
 # server.py is started - see /home/loureiro/source_vitis.sh.
+
+#
+#   "PDI_PATH=/home/loureiro/repos/radiation-setup-jtag/machines_cfgs/versal_files/versal_2_rowA14_colA14_colB14_N34.pdi",
+#   "ELF_PATH=/home/loureiro/repos/radiation-setup-jtag/machines_cfgs/versal_files/versal_2_rowA14_colA14_colB14_N34.elf",
+#
+#  
+#    "PDI_PATH=/home/loureiro/repos/radiation-setup-jtag/machines_cfgs/versal_files/dut_02_rowcol_14_kernels_34.pdi",
+#    "ELF_PATH=/home/loureiro/repos/radiation-setup-jtag/machines_cfgs/versal_files/dut_02_rowcol_14_kernels_34.elf",
+#
+#
+
 redeploy_cmd: [
     "env",
     "PDI_PATH=/home/loureiro/repos/radiation-setup-jtag/machines_cfgs/versal_files/versal_2_rowA14_colA14_colB14_N34.pdi",
