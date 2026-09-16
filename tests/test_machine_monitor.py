@@ -1,6 +1,6 @@
 """
 Hermetic tests for Machine's Monitor wiring (the 'monitor:' YAML field, resolved against
-enabled_monitors.py's MONITORS registry - see machine.py's __start_monitor and TODO.md, "Monitor
+enabled_monitors.py's MONITORS registry - see machine.py's __start_monitor and OPERATOR_COMMANDS.md, "Monitor
 thread API"). Like test_machine_operator_commands.py, this builds real Machine instances from
 temp YAML configs using connection_type: ethernet, and calls the private __start_monitor directly
 (via name mangling) rather than run()/start() - run() also powers the DUT on, waits for boot, and

@@ -326,12 +326,18 @@ mutates, at the cost of up to `max_timeout_time` seconds of latency - one `recei
 long a loop iteration can block). `SLEEP` pauses timeout-based reboot escalation via a timestamp
 checked in `run()`'s `TimeoutError` handling, rather than actually sleeping.
 
-Two producers feed `Machine.command(...)`, both described in full in TODO.md's "Operator ->
-Machine command interface":
+Two producers feed `Machine.command(...)`, both described in full in OPERATOR_COMMANDS.md's
+"Operator -> Machine command interface":
 - **`server/command_cli.py`**'s `InteractiveCommandCLI`, a daemon thread reading stdin lines
-  (three equivalent syntaxes - positional/flag/key=value), started from `server.py` only when
-  `--enable_curses` is off (a blocking `input()` loop is not compatible with `curses.initscr()`
-  owning the terminal).
+  (three equivalent syntaxes - positional/flag/key=value, any part of which may be omitted and
+  filled in via interactive follow-up prompts, with `q`/`quit`/`cancel`/`exit` abandoning an
+  in-progress entry and `help`/`?` showing context-appropriate help), started from `server.py`
+  only when `--enable_curses` is off (this CLI's own stdin reading is not compatible with
+  `curses.initscr()` owning the terminal). Reads stdin via a `select()`-plus-manual-buffering poll
+  loop rather than a plain blocking `input()`/`readline()`, so `stop()` - called from `server.py`
+  on the first Ctrl+C, which stops only this CLI and never the server itself, a further Ctrl+C
+  only actually stopping the server after `cli_shutdown_confirm_delay` seconds (default 5.0) have
+  passed - takes effect within about 0.2s even mid multi-step prompt.
 - **`server/monitors/`**'s per-`Machine` `Monitor` threads: `Machine.run()` calls
   `__start_monitor()` right after the initial `__soft_app_reboot()`, which looks up that DUT's
   YAML `monitor:` field in `enabled_monitors.py`'s `MONITORS` registry (a plain `{name: class}`
@@ -400,10 +406,13 @@ keep new switch backends behind that lock too.
 
 ### Config files
 
-- `server_parameters.yaml`: top-level — `server_ip`, `server_log_file`, `server_log_store_dir`, and
-  the list of `machines` (each an `{enabled, cfg_file}` pair pointing at a per-DUT YAML file).
+- `server_parameters.yaml`: top-level — `server_ip`, `server_log_file`, `server_log_store_dir`,
+  the list of `machines` (each an `{enabled, cfg_file}` pair pointing at a per-DUT YAML file), and
+  the optional `cli_shutdown_confirm_delay` (default 5.0s - see "Operator-requested commands"
+  above for the two-stage Ctrl+C behavior it configures).
 - `machines_cfgs/*.yaml`: one per physical DUT, combining the three independent axes described in
-  "What this is" above:
+  "What this is" above, plus an optional `monitor:` field (see "Operator-requested commands"
+  above):
   - `dut_mode: active` (default) or `passive`, plus whichever fields that mode needs: `active`
     needs `username`/`password` and `json_files` (benchmarks); `passive` needs `redeploy_cmd` (and
     optionally `redeploy_timeout`, `test_name`/`test_header` in place of `json_files`).

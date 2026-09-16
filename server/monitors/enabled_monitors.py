@@ -1,6 +1,6 @@
 """
 Registry of Monitor implementations selectable per-DUT via the 'monitor:' field in a machine's
-YAML config - see TODO.md, "Operator -> Machine command interface" / "Monitor thread API". This
+YAML config - see OPERATOR_COMMANDS.md, "Operator -> Machine command interface" / "Monitor thread API". This
 is the one file to edit to plug in a custom Monitor: write your Monitor subclass in its own file
 under server/monitors/, import it below, and register it under whatever name DUT configs should
 use for 'monitor: <name>'.

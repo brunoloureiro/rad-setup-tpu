@@ -18,7 +18,7 @@ from .dut_deployment import DEFAULT_REDEPLOY_TIMEOUT, redeploy_dut
 from .dut_logging import DUTLogging, EndStatus
 from .dut_message_channel import MessageChannel, create_message_channel
 from .error_codes import ErrorCodes
-from .machine_commands import MachineCommand, MachineCommandDispatcher
+from .machine_commands import MachineCommand, MachineCommandDispatcher, validate_command_params
 from .monitors.enabled_monitors import MONITORS
 from .reboot_machine import reboot_machine, turn_machine_on
 
@@ -318,7 +318,7 @@ class Machine(threading.Thread):
         self.__command_dispatcher.register(DUTCommand.CLOSE_BEAM, self.__on_close_beam_command)
 
         # Dispatcher for operator-issued commands (interactive CLI - command_cli.py - or,
-        # eventually, a per-machine Monitor thread; see TODO.md, "Operator -> Machine command
+        # eventually, a per-machine Monitor thread; see OPERATOR_COMMANDS.md, "Operator -> Machine command
         # interface"). command() (below) queues onto __operator_command_queue from whichever
         # thread calls it; __drain_operator_commands (called from run()) pops and dispatches on
         # this Machine's own thread, so handlers can touch this Machine's state exactly like the
@@ -334,7 +334,7 @@ class Machine(threading.Thread):
         self.__operator_command_dispatcher.register(MachineCommand.SWITCH_BENCHMARK,
                                                      self.__on_operator_switch_benchmark)
 
-        # Optional per-DUT Monitor (see server/monitors/ and TODO.md's "Monitor thread API") -
+        # Optional per-DUT Monitor (see server/monitors/ and OPERATOR_COMMANDS.md's "Monitor thread API") -
         # a name looked up in enabled_monitors.py's MONITORS registry, spawned as its own thread
         # once this Machine's own thread starts running (see __start_monitor, called from run()).
         # None (the default - no 'monitor:' field) means this DUT just runs without one.
@@ -489,9 +489,17 @@ class Machine(threading.Thread):
         """ Stub handler registered for DUTCommand.CLOSE_BEAM - see README.md, "DUT-requested commands" """
         self.__logger.info(f"CLOSE_BEAM received (not yet implemented) args='{args}' on {self}")
 
+    @property
+    def hostname(self) -> str:
+        """ This DUT's configured 'hostname' - read-only, for callers outside this Machine that
+        just need a human-readable name for it (e.g. command_cli.py listing known DUTs while
+        interactively prompting an operator for one - see OPERATOR_COMMANDS.md) without reaching
+        into any other, more sensitive Machine internals. """
+        return self.__dut_hostname
+
     def matches_dut_name(self, name: str) -> bool:
         """ True if `name` identifies this machine to an operator (interactive CLI, or eventually
-        a Monitor - see command_cli.py/TODO.md), tried in this order: this machine's own config
+        a Monitor - see command_cli.py/OPERATOR_COMMANDS.md), tried in this order: this machine's own config
         filename (with or without the .yaml extension, matching whatever was listed as a
         server_parameters.yaml 'machines:' entry's cfg_file), then - only if that didn't match -
         this DUT's 'hostname' field.
@@ -505,7 +513,7 @@ class Machine(threading.Thread):
     def command(self, name: str, **params: str) -> bool:
         """ Thread-safe entry point for an operator-issued command targeting this Machine -
         called from the interactive CLI's own thread (command_cli.py) or, eventually, this
-        machine's Monitor thread (see TODO.md, "Operator -> Machine command interface"). Never
+        machine's Monitor thread (see OPERATOR_COMMANDS.md, "Operator -> Machine command interface"). Never
         raises: an unrecognized command name is logged and dropped right here; a recognized one
         is only queued, and actually runs later inside this Machine's own thread (see
         __drain_operator_commands), where its handler may still log-and-drop it over bad/missing
@@ -561,16 +569,18 @@ class Machine(threading.Thread):
     def __on_operator_sleep(self, params: typing.Dict[str, str]) -> None:
         """ Handler registered for MachineCommand.SLEEP: pause this machine's timeout-based reboot
         escalation for the given duration (see the pause check in run()'s TimeoutError handling).
-        Parameters: seconds (a positive number, as a string). """
-        raw_seconds = params.get("seconds")
-        try:
-            seconds = float(raw_seconds)
-            if seconds <= 0:
-                raise ValueError("seconds must be positive")
-        except (TypeError, ValueError):
-            self.__logger.warning(f"SLEEP requires a positive numeric 'seconds' parameter, got "
-                                  f"{raw_seconds!r} on {self} - ignoring")
+        Parameters: seconds (a positive number, as a string).
+
+        Generic syntax validation (is 'seconds' present and a positive number) is delegated to
+        validate_command_params - the same check command_cli.py already ran before ever queuing
+        this, but re-run here too since Machine.command() can be called by anything (a Monitor,
+        say), not only the CLI - see machine_commands.py's module docstring. """
+        result = validate_command_params(MachineCommand.SLEEP, params)
+        if "seconds" in result.missing_or_invalid:
+            self.__logger.warning(f"SLEEP: 'seconds' parameter is {result.missing_or_invalid['seconds']} "
+                                  f"on {self} - ignoring")
             return
+        seconds = result.values["seconds"]
         self.__logger.info(f"Pausing timeout-based reboot escalation on {self} for {seconds}s "
                            f"(operator SLEEP command)")
         self.__operator_paused_until = time.time() + seconds
@@ -579,15 +589,22 @@ class Machine(threading.Thread):
         """ Handler registered for MachineCommand.SWITCH_BENCHMARK: switch to the benchmark
         matching this codename (see CommandFactory.switch_to_benchmark) and restart the app to
         apply it. Only meaningful for a DUT configured with json_files/CommandFactory.
-        Parameters: benchmark (a codename string, one of self.__command_factory.known_codenames). """
+        Parameters: benchmark (a codename string, one of self.__command_factory.known_codenames).
+
+        Generic syntax validation (is 'benchmark' present and non-empty) goes through
+        validate_command_params, same as SLEEP above; the semantic check - is it actually one of
+        *this* DUT's known codenames - has no meaning outside this Machine's own state, so it
+        stays here rather than in the shared, DUT-agnostic validator. """
         if self.__command_factory is None:
             self.__logger.warning(f"SWITCH_BENCHMARK requested but {self} has no configured "
                                   f"json_files/benchmarks - ignoring")
             return
-        benchmark = params.get("benchmark")
-        if not benchmark:
-            self.__logger.warning(f"SWITCH_BENCHMARK requires a 'benchmark' parameter on {self} - ignoring")
+        result = validate_command_params(MachineCommand.SWITCH_BENCHMARK, params)
+        if "benchmark" in result.missing_or_invalid:
+            self.__logger.warning(f"SWITCH_BENCHMARK: 'benchmark' parameter is "
+                                  f"{result.missing_or_invalid['benchmark']} on {self} - ignoring")
             return
+        benchmark = result.values["benchmark"]
         if not self.__command_factory.switch_to_benchmark(benchmark):
             self.__logger.warning(f"SWITCH_BENCHMARK: unknown benchmark codename '{benchmark}' on {self} "
                                   f"(known: {self.__command_factory.known_codenames}) - ignoring")

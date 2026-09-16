@@ -1,5 +1,5 @@
 """
-Base class for per-Machine Monitor threads - see TODO.md, "Operator -> Machine command
+Base class for per-Machine Monitor threads - see OPERATOR_COMMANDS.md, "Operator -> Machine command
 interface" / "Monitor thread API". A Monitor is a way for a lab to plug in its own
 device-/software-specific monitoring logic (e.g. "reboot every N minutes", "watch for a specific
 string in the DUT log and switch benchmarks") without touching machine.py: implement one

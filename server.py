@@ -6,6 +6,7 @@ import os
 import signal
 import sys
 import threading
+import time
 import traceback
 import typing
 
@@ -23,8 +24,18 @@ PARENT_LOGGER_NAME: str = os.path.basename(str(__file__).lower().replace(".py", 
 # Machine List
 MACHINE_LIST: list = list()
 CONSOLE_CURSES_MANAGER: typing.Optional[ConsoleCursesManager] = None
+INTERACTIVE_CLI: typing.Optional[InteractiveCommandCLI] = None
 
 THREAD_JOIN_TIMEOUT: float = 1.0
+
+# Default for server_parameters.yaml's optional 'cli_shutdown_confirm_delay' - see
+# _decide_sigint_action/__ctrlc_handler below.
+_DEFAULT_CLI_SHUTDOWN_CONFIRM_DELAY_SECONDS = 5.0
+_cli_shutdown_confirm_delay_seconds: float = _DEFAULT_CLI_SHUTDOWN_CONFIRM_DELAY_SECONDS
+# Set to time.time() the moment a Ctrl+C actually stops the interactive CLI (see
+# __ctrlc_handler) - None means that has not happened yet (e.g. --enable_curses runs no CLI at
+# all, or the CLI already exited on its own, such as stdin EOF, rather than via Ctrl+C).
+_cli_stopped_at: typing.Optional[float] = None
 
 
 def __end_daemon_machines():
@@ -37,6 +48,10 @@ def __end_daemon_machines():
     logger.info("Waiting for all threads to join")
     for machine in MACHINE_LIST:
         machine.join(timeout=THREAD_JOIN_TIMEOUT)
+
+    if INTERACTIVE_CLI is not None:
+        INTERACTIVE_CLI.stop()
+        INTERACTIVE_CLI.join(timeout=THREAD_JOIN_TIMEOUT)
 
     if CONSOLE_CURSES_MANAGER is not None:
         CONSOLE_CURSES_MANAGER.stop()
@@ -61,10 +76,59 @@ def __machine_thread_exception_handler(args: threading.ExceptHookArgs):
     sys.exit(errno.ECHILD)
 
 
-def __ctrlc_handler(signum, frame):
-    """ Signal handler to be attached
+def _decide_sigint_action(cli_alive: bool, cli_stopped_at: typing.Optional[float], now: float,
+                          confirm_delay: float) -> str:
+    """ Pure decision logic behind __ctrlc_handler's two-stage Ctrl+C behavior, kept side-effect
+    -free specifically so it can be unit-tested without touching real signals, threads, or
+    sys.exit() - see tests/test_server_ctrlc.py.
+
+    :param cli_alive: whether the interactive CLI thread is currently running
+    :param cli_stopped_at: time.time() of the Ctrl+C that stopped the CLI, or None if that has
+        not happened yet
+    :param now: time.time() at the moment of this SIGINT
+    :param confirm_delay: minimum seconds required between stopping the CLI and a further Ctrl+C
+        being allowed to actually stop the server (server_parameters.yaml's
+        'cli_shutdown_confirm_delay', default 5.0) - guards against an accidental double press
+        ending the whole experiment by mistake
+    :return: one of "stop_cli", "ignore", "shutdown"
     """
+    if cli_alive:
+        return "stop_cli"
+    if cli_stopped_at is not None and (now - cli_stopped_at) < confirm_delay:
+        return "ignore"
+    return "shutdown"
+
+
+def __ctrlc_handler(signum, frame):
+    """ Signal handler to be attached.
+
+    First stops the interactive CLI (see command_cli.py), if one is running, rather than the
+    whole server: an operator sitting at the terminal mid radiation experiment must not be able
+    to end the entire run with a single reflexive Ctrl+C. Only a *further* Ctrl+C stops the
+    server - and even then only once at least _cli_shutdown_confirm_delay_seconds have passed
+    since the CLI was stopped, to guard against an accidental double press doing the same thing
+    by mistake (see OPERATOR_COMMANDS.md). --enable_curses runs have no CLI to stop, so a single
+    Ctrl+C there still shuts down immediately, exactly as before this feature existed.
+    """
+    global _cli_stopped_at
     logger = logging.getLogger(name=PARENT_LOGGER_NAME)
+
+    cli_alive = INTERACTIVE_CLI is not None and INTERACTIVE_CLI.is_alive()
+    action = _decide_sigint_action(cli_alive=cli_alive, cli_stopped_at=_cli_stopped_at,
+                                   now=time.time(), confirm_delay=_cli_shutdown_confirm_delay_seconds)
+
+    if action == "stop_cli":
+        logger.warning(f"Ctrl+C: stopping the interactive CLI (server keeps running) - press "
+                       f"Ctrl+C again after {_cli_shutdown_confirm_delay_seconds:.0f}s to stop "
+                       f"the whole server")
+        INTERACTIVE_CLI.stop()
+        _cli_stopped_at = time.time()
+        return
+
+    if action == "ignore":
+        logger.warning("Ctrl+C ignored (too soon after stopping the CLI) - press again to stop the server")
+        return
+
     logger.error(
         f"KeyboardInterrupt detected, exiting gracefully!( at least trying :) ). signum:{signum} frame:{frame}")
     logger.info("Stopping all threads")
@@ -95,6 +159,10 @@ def main():
     server_log_file = server_parameters['server_log_file']
     server_log_store_dir = server_parameters['server_log_store_dir']
     server_ip = server_parameters['server_ip']
+
+    global _cli_shutdown_confirm_delay_seconds
+    _cli_shutdown_confirm_delay_seconds = server_parameters.get(
+        "cli_shutdown_confirm_delay", _DEFAULT_CLI_SHUTDOWN_CONFIRM_DELAY_SECONDS)
 
     # log in the stdout
     global CONSOLE_CURSES_MANAGER
@@ -130,10 +198,12 @@ def main():
         sys.exit(-1)
 
     # Interactive operator command CLI (see command_cli.py) - only in plain (non-curses) mode:
-    # curses.initscr() owns the terminal display, and a concurrent blocking input() loop reading
-    # the same terminal is not compatible with it (see InteractiveCommandCLI's docstring).
+    # curses.initscr() owns the terminal display, and this CLI's own stdin reading is not
+    # compatible with it (see InteractiveCommandCLI's docstring).
     if args.enable_curses is False:
-        InteractiveCommandCLI(machines=MACHINE_LIST, logger_name=PARENT_LOGGER_NAME).start()
+        global INTERACTIVE_CLI
+        INTERACTIVE_CLI = InteractiveCommandCLI(machines=MACHINE_LIST, logger_name=PARENT_LOGGER_NAME)
+        INTERACTIVE_CLI.start()
 
 
 if __name__ == '__main__':

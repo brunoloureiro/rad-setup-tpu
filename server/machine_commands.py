@@ -1,17 +1,24 @@
 """
 Operator-initiated commands directed at one specific Machine - the reverse direction of
 dut_commands.py's DUT -> server '#CMD' channel: an operator (via the interactive CLI in
-command_cli.py, or eventually a per-machine Monitor thread - see TODO.md, "Operator -> Machine
-command interface") tells one running Machine to do something on demand, instead of only reacting
-to what the DUT itself sends.
+command_cli.py, or a per-machine Monitor thread - see OPERATOR_COMMANDS.md) tells one running
+Machine to do something on demand, instead of only reacting to what the DUT itself sends.
 
 Kept deliberately as a closed, static enum + registered-handler dispatcher, never an arbitrary
-shell/eval, so that operator input - free-form CLI text, or eventually a third-party Monitor
-implementation - can never reach further than a fixed, known set of actions (see CLAUDE.md's
-"the server must never crash" prime directive). Adding a new command is meant to stay an
-additive, two-step change: add a MachineCommand member (plus its expected parameter names in
-COMMAND_PARAM_NAMES below), then dispatcher.register(...) a handler in Machine.__init__ - nothing
-else needs to change.
+shell/eval, so that operator input - free-form CLI text, or a third-party Monitor implementation -
+can never reach further than a fixed, known set of actions (see CLAUDE.md's "the server must
+never crash" prime directive). Adding a new command is meant to stay an additive, two-step
+change: add a MachineCommand member (plus its ParamSpecs in COMMAND_PARAMS below, if it takes
+any), then dispatcher.register(...) a handler in Machine.__init__ - nothing else needs to change.
+
+COMMAND_PARAMS/validate_command_params below are the single source of truth for each command's
+*generic* parameter syntax (names, and simple format checks like "is this a positive number") -
+shared by command_cli.py, so an operator gets immediate, specific feedback ("missing", "invalid",
+"ignoring an unrecognized parameter") while still typing, instead of only finding out from a
+warning buried in the server log after the fact. This is deliberately separate from *semantic*,
+DUT-specific validation (e.g. "is this actually one of this DUT's configured benchmark
+codenames"), which has no meaning outside of one specific Machine's own state and so stays in
+that Machine's own handler (see machine.py's __on_operator_switch_benchmark).
 """
 import enum
 import logging
@@ -50,18 +57,108 @@ class MachineCommand(enum.Enum):
         return self.value
 
 
-# Ordered parameter names expected by each command, used only by command_cli.py's positional
-# syntax to map "<dut> <command> <arg1> [arg2 ...]" onto named params (e.g. "dut01 sleep 30"
-# becomes {"seconds": "30"}). The flag-style (--seconds 30) and key=value (seconds=30) CLI
-# syntaxes name their parameters explicitly and don't consult this table - it also just documents
-# what each command expects. Actual type/range validation of parameter values happens in each
-# command's handler (see Machine's __on_operator_* methods), not here.
-COMMAND_PARAM_NAMES: typing.Dict[MachineCommand, typing.Tuple[str, ...]] = {
+# One-line descriptions shown by the CLI's help/list-commands output (see command_cli.py's
+# describe_commands()).
+COMMAND_HELP: typing.Dict[MachineCommand, str] = {
+    MachineCommand.SOFT_REBOOT: "Restart the app without power cycling (console kill+run, or "
+                                "redeploy_cmd for passive DUTs).",
+    MachineCommand.POWER_CYCLE: "Immediately hard power-cycle the DUT and restart the app.",
+    MachineCommand.SLEEP: "Pause this DUT's timeout-based reboot escalation for a duration.",
+    MachineCommand.SWITCH_BENCHMARK: "Switch to a different benchmark (by codename) and restart "
+                                     "the app to apply it.",
+}
+
+
+class ParamValidationError(ValueError):
+    """ Raised by a ParamSpec.validate function to reject a parameter's raw string value; the
+    message is shown directly to the operator (CLI) or logged as-is (a handler), so it should be
+    a short, human-readable reason - e.g. "must be a positive number", not a stack trace. """
+
+
+def _validate_positive_number(raw_value: str) -> float:
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        raise ParamValidationError(f"must be a number, got {raw_value!r}")
+    if value <= 0:
+        raise ParamValidationError(f"must be positive, got {raw_value!r}")
+    return value
+
+
+def _validate_nonempty_string(raw_value: str) -> str:
+    if not raw_value or not raw_value.strip():
+        raise ParamValidationError("must not be empty")
+    return raw_value
+
+
+class ParamSpec(typing.NamedTuple):
+    name: str
+    # Parses/checks the raw string value, returning a normalized value or raising
+    # ParamValidationError - see _validate_positive_number/_validate_nonempty_string above.
+    validate: typing.Callable[[str], typing.Any]
+    # One-line, human-readable description of what's expected, e.g. "a positive number of
+    # seconds" - shown by the CLI when prompting for this parameter.
+    hint: str
+
+
+# Every command's expected parameters, in the order the CLI's positional syntax maps them (e.g.
+# "dut01 sleep 30" becomes {"seconds": "30"}) - see validate_command_params below for how these
+# are actually checked. This is generic, DUT-agnostic *syntax* validation only (is this even a
+# well-formed value at all) - see this module's docstring for why semantic/DUT-specific checks
+# (e.g. "is this a benchmark codename this DUT actually has") live in Machine's own handlers
+# instead.
+COMMAND_PARAMS: typing.Dict[MachineCommand, typing.Tuple[ParamSpec, ...]] = {
     MachineCommand.SOFT_REBOOT: (),
     MachineCommand.POWER_CYCLE: (),
-    MachineCommand.SLEEP: ("seconds",),
-    MachineCommand.SWITCH_BENCHMARK: ("benchmark",),
+    MachineCommand.SLEEP: (
+        ParamSpec("seconds", _validate_positive_number, "a positive number of seconds"),
+    ),
+    MachineCommand.SWITCH_BENCHMARK: (
+        ParamSpec("benchmark", _validate_nonempty_string, "a benchmark codename (non-empty)"),
+    ),
 }
+
+# Just the ordered names from COMMAND_PARAMS above - kept as its own table since it's what
+# command_cli.py's positional syntax and tests reach for most often.
+COMMAND_PARAM_NAMES: typing.Dict[MachineCommand, typing.Tuple[str, ...]] = {
+    command: tuple(spec.name for spec in specs) for command, specs in COMMAND_PARAMS.items()
+}
+
+
+class ParamValidationResult(typing.NamedTuple):
+    # Recognized parameters that validated successfully, normalized (e.g. "30" -> 30.0) - mostly
+    # useful for callers that want the parsed value; command_cli.py itself still forwards the
+    # original raw strings to Machine.command(), since that is what every handler already expects.
+    values: typing.Dict[str, typing.Any]
+    # name -> reason, for every expected parameter that is either absent from `params` or present
+    # but failed its ParamSpec.validate - the caller should prompt for/report each of these.
+    missing_or_invalid: typing.Dict[str, str]
+    # Human-readable warnings about parameters in `params` that this command doesn't expect at
+    # all - informational only, never blocks anything.
+    warnings: typing.List[str]
+
+
+def validate_command_params(command: MachineCommand, params: typing.Dict[str, str]) -> ParamValidationResult:
+    """ Check `params` against `command`'s ParamSpecs (see COMMAND_PARAMS above). Never raises -
+    every problem is reported through the returned ParamValidationResult instead. """
+    specs = COMMAND_PARAMS.get(command, ())
+    expected_names = {spec.name for spec in specs}
+    values: typing.Dict[str, typing.Any] = dict()
+    missing_or_invalid: typing.Dict[str, str] = dict()
+
+    for spec in specs:
+        if spec.name not in params or params[spec.name] == "":
+            missing_or_invalid[spec.name] = "missing"
+            continue
+        try:
+            values[spec.name] = spec.validate(params[spec.name])
+        except ParamValidationError as e:
+            missing_or_invalid[spec.name] = str(e)
+
+    warnings = [f"ignoring unrecognized parameter '{name}={value}'"
+               for name, value in params.items() if name not in expected_names]
+
+    return ParamValidationResult(values=values, missing_or_invalid=missing_or_invalid, warnings=warnings)
 
 
 # A handler receives this command's parameters (raw strings, as parsed off the CLI/monitor - e.g.

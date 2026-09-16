@@ -1,6 +1,6 @@
 """
 Hermetic tests for Machine's operator-command surface (matches_dut_name/command - see
-machine_commands.py/command_cli.py/TODO.md, "Operator -> Machine command interface"). Like
+machine_commands.py/command_cli.py/OPERATOR_COMMANDS.md, "Operator -> Machine command interface"). Like
 MachineConsoleTypeConfigTestCase in test_machine_config.py, this builds real Machine instances
 from temp YAML configs using connection_type: ethernet (an in-process UDP socket on an
 OS-assigned ephemeral port) - Machine.__init__ never opens a console itself, and these Machines

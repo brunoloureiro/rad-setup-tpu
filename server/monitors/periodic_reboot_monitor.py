@@ -1,6 +1,6 @@
 """
 Example Monitor: unconditionally issues a POWER_CYCLE command to its own Machine on a fixed
-interval (default every 3 minutes) - see TODO.md, "Operator -> Machine command interface". The
+interval (default every 3 minutes) - see OPERATOR_COMMANDS.md, "Operator -> Machine command interface". The
 timer is purely internal to this Monitor - Machine/run() know nothing about it, and this Monitor
 never touches Machine state directly, only ever through command_callback (see base.py), exactly
 like any other Monitor implementation would.
