@@ -8,7 +8,28 @@ Use the tcl scripts to re-deploy upon seeing a crash/exit/abort/etc.
 
 The current implementation of the experiment setup (re)loads the input/golden data from DRAM... this is obviously problematic. One option is to actually have it re-read from SD card (adds a lot of overhead + interrupts), or to have the server push the binary via xsdb (not the worst, but need to benchmark it). The other option is just a full elf reset each time. Benchmark and evaluate these options.
 
-# Operator -> Machine command interface (planned, design in progress)
+# Operator -> Machine command interface (command execution + CLI implemented; Monitor pending)
+
+Implemented so far: the static command list/dispatcher (`server/machine_commands.py`), the
+`Machine.command(...)` entry point + thread-safe queue/drain (`server/machine.py`), and the
+interactive CLI (`server/command_cli.py`, wired into `server.py` for `--enable_curses`-off runs).
+Covered by hermetic tests: `tests/test_machine_commands.py`, `tests/test_command_cli.py`,
+`tests/test_machine_operator_commands.py`.
+
+One deliberate deviation from the original write-up below: `SWITCH_BENCHMARK`'s parameter
+identifies a benchmark by its **codename** (the `codename` field already present on every entry
+loaded from `json_files`), not by a JSON filename - a single json_files entry can itself be a
+list of several benchmarks (see `machines_cfgs/dummy.json`), so codename is the only unambiguous
+per-benchmark identifier already present in `CommandFactory`'s loaded data;
+`CommandFactory.switch_to_benchmark(codename)`/`known_codenames` implement the lookup.
+
+Still pending, not implemented yet: the per-machine Monitor thread (spawning, registry, YAML
+`monitor:` field selection - see "Monitor thread API" below, still an open design question) and
+curses-mode integration for the interactive CLI (see `InteractiveCommandCLI`'s docstring - it is
+currently disabled under `--enable_curses` since a concurrent `input()` loop is not compatible
+with `curses.initscr()` owning the terminal).
+
+## Original design notes
 
 Two related features, both just different *transports* for the same underlying idea: letting an
 operator tell a running `Machine` thread to do something on demand, instead of only reacting to

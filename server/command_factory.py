@@ -72,6 +72,27 @@ class CommandFactory:
         code_header = self.__current_command["header"]
         return cmd_exec, cmd_kill, code_name, code_header
 
+    def switch_to_benchmark(self, codename: str) -> bool:
+        """ Force the currently-selected command to the entry matching `codename`, restarting its
+        command_window from now - used by the operator SWITCH_BENCHMARK command (see
+        machine_commands.py). Does not touch __cmd_queue, so normal rotation continues from
+        wherever it was once this entry's own command_window elapses.
+        :param codename: the 'codename' field of one of this DUT's configured json_files entries
+        :return: True if `codename` matched a known entry (and the switch was made), False otherwise
+        """
+        for entry in self.__json_data_list:
+            if entry.get("codename") == codename:
+                self.__current_command = dict(entry)
+                self.__current_command["start_timestamp"] = time.time()
+                return True
+        return False
+
+    @property
+    def known_codenames(self) -> typing.List[str]:
+        """ codenames of every benchmark entry across all configured json_files, e.g. for
+        validating/logging an operator SWITCH_BENCHMARK request """
+        return [entry["codename"] for entry in self.__json_data_list]
+
     @property
     def current_command_cmd_kill(self) -> bytes:
         """ Get the current command kill command line

@@ -11,6 +11,7 @@ import typing
 
 import yaml
 
+from server.command_cli import InteractiveCommandCLI
 from server.logger_formatter import logging_setup
 from server.machine import Machine
 from server.print_manager import ConsoleCursesManager
@@ -127,6 +128,12 @@ def main():
         __end_daemon_machines()
         # Unknown exit
         sys.exit(-1)
+
+    # Interactive operator command CLI (see command_cli.py) - only in plain (non-curses) mode:
+    # curses.initscr() owns the terminal display, and a concurrent blocking input() loop reading
+    # the same terminal is not compatible with it (see InteractiveCommandCLI's docstring).
+    if args.enable_curses is False:
+        InteractiveCommandCLI(machines=MACHINE_LIST, logger_name=PARENT_LOGGER_NAME).start()
 
 
 if __name__ == '__main__':

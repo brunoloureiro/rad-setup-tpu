@@ -1,10 +1,12 @@
 import errno
 import logging
 import os
+import queue
 import subprocess
 import threading
 import time
 import enum
+import typing
 from typing import Optional
 
 import yaml
@@ -16,6 +18,7 @@ from .dut_deployment import DEFAULT_REDEPLOY_TIMEOUT, redeploy_dut
 from .dut_logging import DUTLogging, EndStatus
 from .dut_message_channel import MessageChannel, create_message_channel
 from .error_codes import ErrorCodes
+from .machine_commands import MachineCommand, MachineCommandDispatcher
 from .reboot_machine import reboot_machine, turn_machine_on
 
 
@@ -132,6 +135,10 @@ class Machine(threading.Thread):
         with open(configuration_file, 'r') as fp:
             machine_parameters = yaml.load(fp, Loader=yaml.SafeLoader)
         self.__dut_hostname = machine_parameters["hostname"]
+        # Basename of this DUT's own config file (no directory), e.g. as listed under a
+        # server_parameters.yaml 'machines:' entry's cfg_file - used by matches_dut_name() below
+        # to resolve an operator command's dut=<name> against this machine (see command_cli.py).
+        self.__cfg_file_basename = os.path.basename(configuration_file)
         # Base directory for this DUT's raw JTAG serial mirror files (see server/serial_tee.py) -
         # a sibling of server_log_path ('logs/' by default), NOT nested inside it: server_log_path
         # holds DUTLogging's per-benchmark-run application/test logs (see
@@ -309,6 +316,22 @@ class Machine(threading.Thread):
         self.__command_dispatcher.register(DUTCommand.OPEN_BEAM, self.__on_open_beam_command)
         self.__command_dispatcher.register(DUTCommand.CLOSE_BEAM, self.__on_close_beam_command)
 
+        # Dispatcher for operator-issued commands (interactive CLI - command_cli.py - or,
+        # eventually, a per-machine Monitor thread; see TODO.md, "Operator -> Machine command
+        # interface"). command() (below) queues onto __operator_command_queue from whichever
+        # thread calls it; __drain_operator_commands (called from run()) pops and dispatches on
+        # this Machine's own thread, so handlers can touch this Machine's state exactly like the
+        # rest of run() does, without extra locking.
+        self.__operator_command_queue: "queue.Queue[typing.Tuple[MachineCommand, typing.Dict[str, str]]]" = queue.Queue()
+        # Set by the SLEEP command to a future time.time() - while paused, a receive() timeout is
+        # treated as an idle wait rather than an unresponsive DUT (see run()).
+        self.__operator_paused_until: float = 0.0
+        self.__operator_command_dispatcher = MachineCommandDispatcher(logger_name=self.__logger_name)
+        self.__operator_command_dispatcher.register(MachineCommand.REBOOT_NOW, self.__on_operator_reboot_now)
+        self.__operator_command_dispatcher.register(MachineCommand.SLEEP, self.__on_operator_sleep)
+        self.__operator_command_dispatcher.register(MachineCommand.SWITCH_BENCHMARK,
+                                                     self.__on_operator_switch_benchmark)
+
         self.__dut_log_path = f"{server_log_path}/{self.__dut_hostname}"
         # make sure that the path exists
         if os.path.isdir(self.__dut_log_path) is False:
@@ -370,6 +393,7 @@ class Machine(threading.Thread):
                                   f"proceeding to (re)start the app anyway")
         self.__soft_app_reboot()
         while self.__stop_event.is_set() is False:
+            self.__drain_operator_commands()
             try:
                 data = self.__message_channel.receive()
                 self.__dut_logging_obj(message=data)
@@ -418,6 +442,13 @@ class Machine(threading.Thread):
                         f"Benchmark exceeded the command execution window, executing another one now on {self}.")
                     self.__soft_app_reboot(previous_log_end_status=EndStatus.NORMAL_END)
             except TimeoutError:
+                # An operator SLEEP command (see __on_operator_sleep) pauses reboot escalation
+                # for a duration - a receive() timeout while paused is an expected idle wait, not
+                # an unresponsive DUT, so skip straight back to the top of the loop (which will
+                # keep draining operator commands and re-checking the message channel) rather than
+                # escalating.
+                if time.time() < self.__operator_paused_until:
+                    continue
                 # Soft app reboot
                 soft_app_reboot_status = self.__soft_app_reboot(previous_log_end_status=EndStatus.SOFT_APP_REBOOT)
                 if soft_app_reboot_status == ErrorCodes.SUCCESS:
@@ -448,6 +479,98 @@ class Machine(threading.Thread):
     def __on_close_beam_command(self, args: str) -> None:
         """ Stub handler registered for DUTCommand.CLOSE_BEAM - see README.md, "DUT-requested commands" """
         self.__logger.info(f"CLOSE_BEAM received (not yet implemented) args='{args}' on {self}")
+
+    def matches_dut_name(self, name: str) -> bool:
+        """ True if `name` identifies this machine to an operator (interactive CLI, or eventually
+        a Monitor - see command_cli.py/TODO.md), tried in this order: this machine's own config
+        filename (with or without the .yaml extension, matching whatever was listed as a
+        server_parameters.yaml 'machines:' entry's cfg_file), then - only if that didn't match -
+        this DUT's 'hostname' field.
+        """
+        name = name.strip()
+        cfg_stem, _ = os.path.splitext(self.__cfg_file_basename)
+        if name in (self.__cfg_file_basename, cfg_stem):
+            return True
+        return name == self.__dut_hostname
+
+    def command(self, name: str, **params: str) -> bool:
+        """ Thread-safe entry point for an operator-issued command targeting this Machine -
+        called from the interactive CLI's own thread (command_cli.py) or, eventually, this
+        machine's Monitor thread (see TODO.md, "Operator -> Machine command interface"). Never
+        raises: an unrecognized command name is logged and dropped right here; a recognized one
+        is only queued, and actually runs later inside this Machine's own thread (see
+        __drain_operator_commands), where its handler may still log-and-drop it over bad/missing
+        parameters without that affecting anything else running on this machine.
+        :param name: one of MachineCommand's member names, case-insensitive (e.g. "sleep")
+        :param params: command-specific keyword parameters, e.g. seconds="30"
+        :return: True if a known command was queued for execution, False if `name` was not recognized
+        """
+        command = MachineCommand.from_string(name)
+        if command is None:
+            self.__logger.warning(f"Received unknown operator command '{name}' for {self} - ignoring")
+            return False
+        self.__operator_command_queue.put((command, params))
+        return True
+
+    def __drain_operator_commands(self) -> None:
+        """ Execute every operator command queued (via command() above) since the last iteration
+        of run()'s receive loop. Draining happens here, in this Machine's own thread, rather than
+        directly inside command(), specifically so handlers can safely touch the same state run()
+        itself mutates (reboot counters, __dut_logging_obj, ...) without any locking - the
+        tradeoff is that a queued command may sit for up to __max_timeout_time seconds before
+        running, since that is how long a single receive() call (and therefore one loop
+        iteration) can block.
+        """
+        while True:
+            try:
+                command, params = self.__operator_command_queue.get_nowait()
+            except queue.Empty:
+                return
+            self.__operator_command_dispatcher.dispatch(command, params)
+
+    def __on_operator_reboot_now(self, params: typing.Dict[str, str]) -> None:
+        """ Handler registered for MachineCommand.REBOOT_NOW: hard power cycle + restart the app,
+        on operator request, bypassing normal timeout escalation. No parameters. """
+        self.__logger.info(f"Operator-requested immediate hard reboot on {self}")
+        self.__hard_reboot()
+        self.__soft_app_reboot(previous_log_end_status=EndStatus.HARD_REBOOT)
+
+    def __on_operator_sleep(self, params: typing.Dict[str, str]) -> None:
+        """ Handler registered for MachineCommand.SLEEP: pause this machine's timeout-based reboot
+        escalation for the given duration (see the pause check in run()'s TimeoutError handling).
+        Parameters: seconds (a positive number, as a string). """
+        raw_seconds = params.get("seconds")
+        try:
+            seconds = float(raw_seconds)
+            if seconds <= 0:
+                raise ValueError("seconds must be positive")
+        except (TypeError, ValueError):
+            self.__logger.warning(f"SLEEP requires a positive numeric 'seconds' parameter, got "
+                                  f"{raw_seconds!r} on {self} - ignoring")
+            return
+        self.__logger.info(f"Pausing timeout-based reboot escalation on {self} for {seconds}s "
+                           f"(operator SLEEP command)")
+        self.__operator_paused_until = time.time() + seconds
+
+    def __on_operator_switch_benchmark(self, params: typing.Dict[str, str]) -> None:
+        """ Handler registered for MachineCommand.SWITCH_BENCHMARK: switch to the benchmark
+        matching this codename (see CommandFactory.switch_to_benchmark) and restart the app to
+        apply it. Only meaningful for a DUT configured with json_files/CommandFactory.
+        Parameters: benchmark (a codename string, one of self.__command_factory.known_codenames). """
+        if self.__command_factory is None:
+            self.__logger.warning(f"SWITCH_BENCHMARK requested but {self} has no configured "
+                                  f"json_files/benchmarks - ignoring")
+            return
+        benchmark = params.get("benchmark")
+        if not benchmark:
+            self.__logger.warning(f"SWITCH_BENCHMARK requires a 'benchmark' parameter on {self} - ignoring")
+            return
+        if not self.__command_factory.switch_to_benchmark(benchmark):
+            self.__logger.warning(f"SWITCH_BENCHMARK: unknown benchmark codename '{benchmark}' on {self} "
+                                  f"(known: {self.__command_factory.known_codenames}) - ignoring")
+            return
+        self.__logger.info(f"Switching benchmark to '{benchmark}' on {self} (restarting app to apply)")
+        self.__soft_app_reboot(previous_log_end_status=EndStatus.SOFT_APP_REBOOT)
 
     def __new_dut_connection(self) -> DUTConnection:
         """ Build a fresh, not-yet-logged-in console connection for this (active) DUT - Telnet or
