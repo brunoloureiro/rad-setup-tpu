@@ -48,6 +48,50 @@ and `connection_type` may independently point at the same or different serial de
 `connection_type: jtag` is unrelated to `console_type: jtag` even though both may reuse the phrase
 "JTAG probe's serial/UART bridge" - one is the message channel, the other is the console.
 
+## Prime directive: the server must never crash
+
+This server runs unattended in a beam room during live, unrepeatable radiation experiments. If the
+process dies, every DUT it manages goes unmonitored (best case) or the run's data becomes unusable
+(worst case — the whole point of this system is knowing exactly when/how/why each DUT was
+rebooted, so a gap in that record can invalidate the experiment). Beam time cannot be replayed, so
+**a server crash is strictly worse than any other failure this codebase could have** — a wrong
+reboot decision or a stuck DUT affects one `Machine` thread; a crashed process takes every DUT down
+at once. Weigh this before correctness, cleanliness, or performance on anything touching this
+codebase, and treat "can this new code path bring the whole process down?" as the first question
+for any change, not an afterthought.
+
+The codebase already encodes this priority in several places — extend the same pattern rather than
+inventing a new one:
+- `server.py` installs a `threading.excepthook` (`__machine_thread_exception_handler`) that treats
+  *any* uncaught exception escaping a `Machine` thread as fatal to the whole server (logs and
+  exits). This is an intentional trip-wire, not a bug to route around: it means every `Machine` and
+  the modules it owns must catch and handle their own expected failure modes (unresponsive DUT,
+  dropped serial port, unreachable power switch, malformed message, subprocess failure, ...)
+  internally. Nothing should be able to reach `threading.excepthook` in normal operation, including
+  a misbehaving/malicious DUT payload.
+- `JTAGMessageChannel.open()` (`server/dut_message_channel.py`) is explicitly documented to *never
+  raise*, because it runs unguarded from `Machine.__init__`: a missing/unplugged JTAG probe for one
+  DUT must not prevent every other `Machine` thread — unrelated DUTs — from starting at all. Any new
+  "open a device/connection eagerly at startup" code must follow the same never-raise contract.
+- `TelnetDUTConnection.open()`, `JTAGMessageChannel.open()`, and `JTAGDUTConnection.open()` all
+  validate preconditions up front (`os.path.exists`, reachability, etc.) and log clearly, instead of
+  letting a missing device produce a bare, easy-to-miss stack trace.
+- `Machine.run()`'s escalation ladder (soft app reboot -> soft OS reboot -> hard power cycle) exists
+  so that *any* kind of DUT misbehavior or transport failure degrades to "retry/reboot this one DUT,"
+  never to "propagate and take the process down."
+- `reboot_machine.py`'s `__GLOBAL_LOCK` and its fragile curl/HTTP output parsing exist because a
+  flaky power-switch backend previously caused real field issues — every external I/O call
+  (network, serial, subprocess, HTTP) should be assumed to fail intermittently and be
+  caught/retried/logged at its own call site, not left to bubble up.
+
+When adding or modifying anything reachable from a `Machine` thread (console I/O, message-channel
+I/O, redeploy subprocesses, power-switch calls, DUT command handlers, new transports), default to
+catching and logging expected exceptions locally and letting that machine's own retry/escalation
+logic absorb the fallout, rather than trusting some caller further up the stack to handle it. If
+you're unsure whether a new code path could escape to `threading.excepthook` (or otherwise kill the
+main thread/process), treat that uncertainty as a bug to resolve before merging — not an acceptable
+risk, and not something a broad top-level `try/except` bolted on later should paper over.
+
 ## Running
 
 ```bash
