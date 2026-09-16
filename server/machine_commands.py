@@ -19,9 +19,15 @@ import typing
 
 
 class MachineCommand(enum.Enum):
+    # Restart the app without power cycling (console kill+run for active DUTs, redeploy_cmd for
+    # passive ones) - same underlying action as DUTCommand.SOFT_REBOOT, just operator-triggered.
+    # No parameters. Not every DUT can actually complete one on request (e.g. the console is
+    # unreachable, or this machine already hit its MAX_SEQUENTIALLY_SOFT_APP_REBOOTS ceiling) -
+    # the handler logs a warning and otherwise does nothing in that case; it never raises.
+    SOFT_REBOOT = "SOFT_REBOOT"
     # Force an immediate hard power cycle + app restart, bypassing normal timeout escalation.
-    # No parameters.
-    REBOOT_NOW = "REBOOT_NOW"
+    # No parameters. ("now" is implied - there is no delayed/scheduled variant.)
+    POWER_CYCLE = "POWER_CYCLE"
     # Pause this machine's timeout-based reboot escalation for a given duration. Does not touch
     # the DUT itself, and does not stop message logging - only suppresses the soft/hard reboot
     # escalation that would otherwise trigger on a receive() timeout while paused.
@@ -51,7 +57,8 @@ class MachineCommand(enum.Enum):
 # what each command expects. Actual type/range validation of parameter values happens in each
 # command's handler (see Machine's __on_operator_* methods), not here.
 COMMAND_PARAM_NAMES: typing.Dict[MachineCommand, typing.Tuple[str, ...]] = {
-    MachineCommand.REBOOT_NOW: (),
+    MachineCommand.SOFT_REBOOT: (),
+    MachineCommand.POWER_CYCLE: (),
     MachineCommand.SLEEP: ("seconds",),
     MachineCommand.SWITCH_BENCHMARK: ("benchmark",),
 }

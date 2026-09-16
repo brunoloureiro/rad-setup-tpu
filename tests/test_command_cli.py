@@ -27,8 +27,8 @@ class ParseCommandLinePositionalTestCase(unittest.TestCase):
         self.assertEqual(result, ParsedCommand(dut="dut01", command="sleep", params={"seconds": "30"}))
 
     def test_command_with_no_arguments(self):
-        result = parse_command_line("dut01 reboot_now")
-        self.assertEqual(result, ParsedCommand(dut="dut01", command="reboot_now", params={}))
+        result = parse_command_line("dut01 power_cycle")
+        self.assertEqual(result, ParsedCommand(dut="dut01", command="power_cycle", params={}))
 
     def test_too_few_tokens_is_an_error(self):
         result = parse_command_line("justoneword")
@@ -50,8 +50,8 @@ class ParseCommandLineFlagStyleTestCase(unittest.TestCase):
                                                params={"benchmark": "example_cxx"}))
 
     def test_cmd_alias_accepted(self):
-        result = parse_command_line("--dut dut01 --cmd reboot_now")
-        self.assertEqual(result, ParsedCommand(dut="dut01", command="reboot_now", params={}))
+        result = parse_command_line("--dut dut01 --cmd power_cycle")
+        self.assertEqual(result, ParsedCommand(dut="dut01", command="power_cycle", params={}))
 
     def test_missing_command_is_an_error(self):
         result = parse_command_line("--dut dut01")
@@ -68,11 +68,11 @@ class ParseCommandLineKeyValueStyleTestCase(unittest.TestCase):
         self.assertEqual(result, ParsedCommand(dut="dut01", command="sleep", params={"seconds": "30"}))
 
     def test_cmd_alias_accepted(self):
-        result = parse_command_line("dut=dut01 cmd=reboot_now")
-        self.assertEqual(result, ParsedCommand(dut="dut01", command="reboot_now", params={}))
+        result = parse_command_line("dut=dut01 cmd=power_cycle")
+        self.assertEqual(result, ParsedCommand(dut="dut01", command="power_cycle", params={}))
 
     def test_missing_dut_is_an_error(self):
-        result = parse_command_line("command=reboot_now")
+        result = parse_command_line("command=power_cycle")
         self.assertIsInstance(result, CommandLineError)
 
 

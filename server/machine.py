@@ -19,6 +19,7 @@ from .dut_logging import DUTLogging, EndStatus
 from .dut_message_channel import MessageChannel, create_message_channel
 from .error_codes import ErrorCodes
 from .machine_commands import MachineCommand, MachineCommandDispatcher
+from .monitors.enabled_monitors import MONITORS
 from .reboot_machine import reboot_machine, turn_machine_on
 
 
@@ -327,10 +328,17 @@ class Machine(threading.Thread):
         # treated as an idle wait rather than an unresponsive DUT (see run()).
         self.__operator_paused_until: float = 0.0
         self.__operator_command_dispatcher = MachineCommandDispatcher(logger_name=self.__logger_name)
-        self.__operator_command_dispatcher.register(MachineCommand.REBOOT_NOW, self.__on_operator_reboot_now)
+        self.__operator_command_dispatcher.register(MachineCommand.SOFT_REBOOT, self.__on_operator_soft_reboot)
+        self.__operator_command_dispatcher.register(MachineCommand.POWER_CYCLE, self.__on_operator_power_cycle)
         self.__operator_command_dispatcher.register(MachineCommand.SLEEP, self.__on_operator_sleep)
         self.__operator_command_dispatcher.register(MachineCommand.SWITCH_BENCHMARK,
                                                      self.__on_operator_switch_benchmark)
+
+        # Optional per-DUT Monitor (see server/monitors/ and TODO.md's "Monitor thread API") -
+        # a name looked up in enabled_monitors.py's MONITORS registry, spawned as its own thread
+        # once this Machine's own thread starts running (see __start_monitor, called from run()).
+        # None (the default - no 'monitor:' field) means this DUT just runs without one.
+        self.__monitor_name = machine_parameters.get("monitor")
 
         self.__dut_log_path = f"{server_log_path}/{self.__dut_hostname}"
         # make sure that the path exists
@@ -392,6 +400,7 @@ class Machine(threading.Thread):
             self.__logger.warning(f"Initial boot check did not succeed ({boot_status}) on {self}, "
                                   f"proceeding to (re)start the app anyway")
         self.__soft_app_reboot()
+        self.__start_monitor()
         while self.__stop_event.is_set() is False:
             self.__drain_operator_commands()
             try:
@@ -528,10 +537,24 @@ class Machine(threading.Thread):
                 return
             self.__operator_command_dispatcher.dispatch(command, params)
 
-    def __on_operator_reboot_now(self, params: typing.Dict[str, str]) -> None:
-        """ Handler registered for MachineCommand.REBOOT_NOW: hard power cycle + restart the app,
-        on operator request, bypassing normal timeout escalation. No parameters. """
-        self.__logger.info(f"Operator-requested immediate hard reboot on {self}")
+    def __on_operator_soft_reboot(self, params: typing.Dict[str, str]) -> None:
+        """ Handler registered for MachineCommand.SOFT_REBOOT: restart the app without power
+        cycling (console kill+run for active DUTs, redeploy_cmd for passive ones), on operator
+        request - the same underlying action as DUTCommand.SOFT_REBOOT. No parameters.
+
+        Not every DUT can actually complete one right now (console unreachable, or this machine
+        already hit its MAX_SEQUENTIALLY_SOFT_APP_REBOOTS ceiling, ...) - __soft_app_reboot
+        reports that via its return code rather than raising, so this just logs it as a warning
+        instead of silently doing nothing; it never crashes the server either way. """
+        self.__logger.info(f"Operator-requested soft reboot on {self}")
+        status = self.__soft_app_reboot(previous_log_end_status=EndStatus.SOFT_APP_REBOOT)
+        if status != ErrorCodes.SUCCESS:
+            self.__logger.warning(f"Operator-requested soft reboot did not succeed on {self}: {status}")
+
+    def __on_operator_power_cycle(self, params: typing.Dict[str, str]) -> None:
+        """ Handler registered for MachineCommand.POWER_CYCLE: hard power cycle + restart the
+        app, on operator request, bypassing normal timeout escalation. No parameters. """
+        self.__logger.info(f"Operator-requested immediate hard reboot (power cycle) on {self}")
         self.__hard_reboot()
         self.__soft_app_reboot(previous_log_end_status=EndStatus.HARD_REBOOT)
 
@@ -571,6 +594,40 @@ class Machine(threading.Thread):
             return
         self.__logger.info(f"Switching benchmark to '{benchmark}' on {self} (restarting app to apply)")
         self.__soft_app_reboot(previous_log_end_status=EndStatus.SOFT_APP_REBOOT)
+
+    def __current_log_file(self) -> Optional[str]:
+        """ Path of the currently-open DUTLogging file for this DUT, or None between app runs -
+        handed to this machine's Monitor (if any) as its current_log_file callback (see
+        server/monitors/base.py) since __dut_logging_obj itself is a private, ever-changing
+        Machine attribute a Monitor must never touch directly. """
+        return self.__dut_logging_obj.log_filename if self.__dut_logging_obj else None
+
+    def __start_monitor(self) -> None:
+        """ Spawn this DUT's configured Monitor thread (see 'monitor:' in the machine YAML config
+        and server/monitors/enabled_monitors.py's MONITORS registry), if any. Never raises: an
+        unconfigured 'monitor' field just means no monitor for this DUT, and an unknown/failing
+        one is logged and this machine simply keeps running without one - a monitor is additive
+        functionality, never something that can prevent this (or any other) Machine from
+        operating (see CLAUDE.md's prime directive). """
+        if not self.__monitor_name:
+            return
+
+        monitor_cls = MONITORS.get(self.__monitor_name)
+        if monitor_cls is None:
+            self.__logger.error(f"Unknown monitor '{self.__monitor_name}' on {self} (known: "
+                                f"{sorted(MONITORS)}) - running without a monitor")
+            return
+
+        try:
+            monitor = monitor_cls(command_callback=self.command, log_dir=self.__dut_log_path,
+                                  current_log_file=self.__current_log_file,
+                                  hostname=self.__dut_hostname, logger_name=self.__logger_name,
+                                  stop_event=self.__stop_event)
+            monitor.start()
+            self.__logger.info(f"Started monitor '{self.__monitor_name}' on {self}")
+        except Exception as e:
+            self.__logger.exception(f"Failed to start monitor '{self.__monitor_name}' on {self} "
+                                    f"- running without one: {e}")
 
     def __new_dut_connection(self) -> DUTConnection:
         """ Build a fresh, not-yet-logged-in console connection for this (active) DUT - Telnet or

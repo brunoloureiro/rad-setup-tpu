@@ -68,6 +68,8 @@ class MachineOperatorCommandsTestCase(unittest.TestCase):
     def test_command_accepts_known_command_case_insensitively(self):
         self.assertTrue(self.machine.command("sleep", seconds="30"))
         self.assertTrue(self.machine.command("SWITCH_BENCHMARK", benchmark="example_cxx"))
+        self.assertTrue(self.machine.command("soft_reboot"))
+        self.assertTrue(self.machine.command("POWER_CYCLE"))
 
     def test_command_rejects_unknown_command_without_raising(self):
         self.assertFalse(self.machine.command("not_a_real_command"))

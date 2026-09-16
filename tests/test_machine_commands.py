@@ -13,6 +13,10 @@ class MachineCommandTestCase(unittest.TestCase):
         self.assertEqual(MachineCommand.from_string("SLEEP"), MachineCommand.SLEEP)
         self.assertEqual(MachineCommand.from_string("  sleep  "), MachineCommand.SLEEP)
 
+    def test_from_string_recognizes_soft_and_hard_reboot(self):
+        self.assertEqual(MachineCommand.from_string("soft_reboot"), MachineCommand.SOFT_REBOOT)
+        self.assertEqual(MachineCommand.from_string("power_cycle"), MachineCommand.POWER_CYCLE)
+
     def test_from_string_unknown_returns_none(self):
         self.assertIsNone(MachineCommand.from_string("not_a_real_command"))
         self.assertIsNone(MachineCommand.from_string(""))
@@ -36,26 +40,26 @@ class MachineCommandDispatcherTestCase(unittest.TestCase):
         self.assertEqual(received, [{"seconds": "5"}])
 
     def test_dispatch_unregistered_command_returns_false_without_raising(self):
-        result = self.dispatcher.dispatch(MachineCommand.REBOOT_NOW, {})
+        result = self.dispatcher.dispatch(MachineCommand.POWER_CYCLE, {})
         self.assertFalse(result)
 
     def test_dispatch_swallows_handler_exception(self):
         def raising_handler(params):
             raise RuntimeError("boom")
 
-        self.dispatcher.register(MachineCommand.REBOOT_NOW, raising_handler)
+        self.dispatcher.register(MachineCommand.POWER_CYCLE, raising_handler)
 
         # Must never raise out of dispatch() - a handler bug must not be able to escape into the
         # Machine thread and trip threading.excepthook (see CLAUDE.md's prime directive).
-        result = self.dispatcher.dispatch(MachineCommand.REBOOT_NOW, {})
+        result = self.dispatcher.dispatch(MachineCommand.POWER_CYCLE, {})
         self.assertFalse(result)
 
     def test_register_replaces_existing_handler(self):
         calls = []
-        self.dispatcher.register(MachineCommand.REBOOT_NOW, lambda params: calls.append("first"))
-        self.dispatcher.register(MachineCommand.REBOOT_NOW, lambda params: calls.append("second"))
+        self.dispatcher.register(MachineCommand.POWER_CYCLE, lambda params: calls.append("first"))
+        self.dispatcher.register(MachineCommand.POWER_CYCLE, lambda params: calls.append("second"))
 
-        self.dispatcher.dispatch(MachineCommand.REBOOT_NOW, {})
+        self.dispatcher.dispatch(MachineCommand.POWER_CYCLE, {})
 
         self.assertEqual(calls, ["second"])
 

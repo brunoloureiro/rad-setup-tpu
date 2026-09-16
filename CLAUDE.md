@@ -310,6 +310,43 @@ message is kept for backward compatibility but is now just routed through the sa
 `DUTCommand` member, then `dispatcher.register(...)` a handler — no changes needed to the
 message-parsing code in `run()`.
 
+### Operator-requested commands (`server/machine_commands.py`, `server/command_cli.py`, `server/monitors/`)
+
+The reverse direction of the DUT-requested channel above: an operator tells one specific `Machine`
+to do something on demand, instead of only reacting to what the DUT sends. `MachineCommand` is a
+closed enum (`SOFT_REBOOT`, `POWER_CYCLE`, `SLEEP`, `SWITCH_BENCHMARK`) dispatched through a
+`MachineCommandDispatcher`, exactly mirroring `DUTCommand`/`DUTCommandDispatcher`'s
+enum-member-plus-registered-handler shape but with an added `try/except` around handler execution
+(operator input - free-form CLI text, or a third-party `Monitor`, see below - is less trusted than
+this codebase's other internal call paths). `Machine.command(name, **params)` is the single entry
+point: it validates the command name in whichever thread calls it, then queues valid ones onto a
+`queue.Queue` that `Machine.run()` drains once per loop iteration (`__drain_operator_commands`, so
+handlers run on the Machine's own thread and can safely touch the same state `run()` itself
+mutates, at the cost of up to `max_timeout_time` seconds of latency - one `receive()` call is how
+long a loop iteration can block). `SLEEP` pauses timeout-based reboot escalation via a timestamp
+checked in `run()`'s `TimeoutError` handling, rather than actually sleeping.
+
+Two producers feed `Machine.command(...)`, both described in full in TODO.md's "Operator ->
+Machine command interface":
+- **`server/command_cli.py`**'s `InteractiveCommandCLI`, a daemon thread reading stdin lines
+  (three equivalent syntaxes - positional/flag/key=value), started from `server.py` only when
+  `--enable_curses` is off (a blocking `input()` loop is not compatible with `curses.initscr()`
+  owning the terminal).
+- **`server/monitors/`**'s per-`Machine` `Monitor` threads: `Machine.run()` calls
+  `__start_monitor()` right after the initial `__soft_app_reboot()`, which looks up that DUT's
+  YAML `monitor:` field in `enabled_monitors.py`'s `MONITORS` registry (a plain `{name: class}`
+  dict, deliberately not reflection/auto-discovery) and, if found, constructs and starts it,
+  passing it a bound `Machine.command` plus DUT log access (`Monitor.log_files()`/
+  `current_log_file()` - standard on the base class, since most monitoring logic needs to see what
+  the DUT is actually doing). `enabled_monitors.py` is the one file to edit to add a custom
+  monitor: each import is wrapped in its own `try/except` so a broken custom monitor module can
+  only make its own name unavailable, never stop the server from starting for any other DUT; a
+  duplicate name keeps the first registration and logs a warning. No `monitor:` field means no
+  monitor for that DUT; an unrecognized name is logged as an error - neither case raises.
+  `server/monitors/periodic_reboot_monitor.py`'s `PeriodicRebootMonitor` is the reference
+  implementation: it just calls `command_callback("POWER_CYCLE")` on a fixed interval via
+  `self._stop_event.wait(...)`, the same interruptible-wait convention `Machine` itself follows.
+
 ### Passive DUT deployment (`server/dut_deployment.py`)
 
 For `dut_mode: passive` DUTs, `Machine.__passive_redeploy()` (called from `__soft_app_reboot`
